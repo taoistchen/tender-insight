@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef, useCallback } from "react";
 
 /* ─── Types ─── */
 
@@ -75,6 +75,51 @@ function ErrorState({ message, onRetry }: { message: string; onRetry: () => void
   return <div className="error-state"><p className="error-icon">⚠</p><p className="error-message">{message}</p><button className="btn btn-primary" onClick={onRetry}>重试</button></div>;
 }
 
+/* ─── Modal ─── */
+
+function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <h3>{title}</h3>
+          <button className="btn" onClick={onClose}>✕</button>
+        </div>
+        <div className="modal-body">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Upload Zone ─── */
+
+function UploadZone({ onFiles }: { onFiles: (files: File[]) => void }) {
+  const [dragging, setDragging] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault(); setDragging(false);
+    const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith("image/") || f.type === "application/pdf");
+    if (files.length) onFiles(files);
+  }, [onFiles]);
+
+  return (
+    <div
+      className={`upload-zone ${dragging ? "upload-zone--active" : ""}`}
+      onDragOver={e => { e.preventDefault(); setDragging(true); }}
+      onDragLeave={() => setDragging(false)}
+      onDrop={handleDrop}
+      onClick={() => inputRef.current?.click()}
+    >
+      <input ref={inputRef} type="file" multiple accept="image/*,application/pdf" style={{ display: "none" }}
+        onChange={e => { const files = Array.from(e.target.files ?? []); if (files.length) onFiles(files); }} />
+      <p className="upload-zone-icon">📄</p>
+      <p>拖拽资质证书文件到此处，或点击选择</p>
+      <p className="upload-zone-hint">支持 JPG/PNG/PDF，可多选，单文件 ≤ 10MB</p>
+    </div>
+  );
+}
+
 /* ─── Admin Form Components ─── */
 
 function AdminForm({ onSubmit, initial, onCancel, fields }: {
@@ -147,6 +192,32 @@ export function App() {
   const [adminLoading, setAdminLoading] = useState(false);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<EditTarget | null>(null);
+
+  // Upload & AI extraction
+  const [uploading, setUploading] = useState(false);
+  const [extracted, setExtracted] = useState<{ name: string; level: string; validTo: string | null; confidence: string }[]>([]);
+  const [showPrefsModal, setShowPrefsModal] = useState(false);
+
+  async function handleUpload(files: File[]) {
+    setUploading(true); setExtracted([]);
+    const form = new FormData();
+    files.forEach(f => form.append("files", f));
+    try {
+      const r = await fetch(`${API}/company/qualifications/upload`, { method: "POST", body: form });
+      const data = await r.json();
+      if (data.extracted) setExtracted(data.extracted);
+    } catch (err) { console.error("Upload failed:", err); }
+    setUploading(false);
+  }
+
+  async function confirmExtracted(items: typeof extracted) {
+    if (!items.length) return;
+    await fetch(`${API}/company/qualifications/confirm`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ qualifications: items.map(({ name, level, validTo }) => ({ name, level, validTo })) })
+    });
+    setExtracted([]); fetchAdmin();
+  }
 
   /* ─── Fetch ─── */
 
@@ -327,20 +398,41 @@ export function App() {
             <div className="admin-content">
               {/* Qualifications */}
               {adminTab === "qualifications" && (
-                <AdminList items={quals} render={q => <><strong>{q.name}</strong> <span className="qualification-level-tag">{q.level}</span> <span className="admin-meta">有效期至 {formatDate(q.validTo)}</span></>}
-                  onDelete={id => deleteItem(`${API}/company/qualifications/${id}`)}
-                  onEdit={q => { setEditing(q); setAdding(true); }}
-                  addLabel="+ 新增资质" adding={adding} onAdd={() => { setAdding(true); setEditing(null); }}
-                  addForm={<AdminForm
-                    fields={[{ key: "name", label: "资质名称" }, { key: "level", label: "等级" }, { key: "validTo", label: "有效期至", type: "date" }]}
-                    initial={editing ? { name: editing.name as string, level: editing.level as string, validTo: editing.validTo as string } : undefined}
-                    onCancel={() => { setAdding(false); setEditing(null); }}
-                    onSubmit={data => {
-                      if (editing) saveItem(`${API}/company/qualifications/${editing.id}`, "PUT", data);
-                      else saveItem(`${API}/company/qualifications`, "POST", data);
-                    }}
-                  />}
-                />
+                <>
+                  <UploadZone onFiles={handleUpload} />
+                  {uploading && <div className="loading-state"><div className="spinner" /><p>AI 正在识别证书…</p></div>}
+                  {extracted.length > 0 && (
+                    <div className="extracted-results">
+                      <p className="extracted-title">AI 识别结果（请确认后入库）</p>
+                      {extracted.map((q, i) => (
+                        <div key={i} className="extracted-row">
+                          <span><strong>{q.name}</strong> — {q.level}</span>
+                          {q.validTo && <span className="admin-meta">有效期至 {q.validTo}</span>}
+                          <span className={`confidence confidence--${q.confidence}`}>{q.confidence === "high" ? "高置信" : "中置信"}</span>
+                        </div>
+                      ))}
+                      <div className="extracted-actions">
+                        <button className="btn btn-primary" onClick={() => confirmExtracted(extracted)}>全部确认入库</button>
+                        <button className="btn" onClick={() => setExtracted([])}>放弃</button>
+                      </div>
+                    </div>
+                  )}
+                  <hr style={{ margin: "20px 0", border: "none", borderTop: "1px solid var(--color-border)" }} />
+                  <AdminList items={quals} render={q => <><strong>{q.name}</strong> <span className="qualification-level-tag">{q.level}</span> <span className="admin-meta">有效期至 {formatDate(q.validTo)}</span></>}
+                    onDelete={id => deleteItem(`${API}/company/qualifications/${id}`)}
+                    onEdit={q => { setEditing(q); setAdding(true); }}
+                    addLabel="+ 手动新增资质" adding={adding} onAdd={() => { setAdding(true); setEditing(null); }}
+                    addForm={<AdminForm
+                      fields={[{ key: "name", label: "资质名称" }, { key: "level", label: "等级" }, { key: "validTo", label: "有效期至", type: "date" }]}
+                      initial={editing ? { name: editing.name as string, level: editing.level as string, validTo: editing.validTo as string } : undefined}
+                      onCancel={() => { setAdding(false); setEditing(null); }}
+                      onSubmit={data => {
+                        if (editing) saveItem(`${API}/company/qualifications/${editing.id}`, "PUT", data);
+                        else saveItem(`${API}/company/qualifications`, "POST", data);
+                      }}
+                    />}
+                  />
+                </>
               )}
 
               {/* Personnel */}
@@ -382,35 +474,61 @@ export function App() {
               {/* Preferences */}
               {adminTab === "preferences" && prefs && (
                 <div className="admin-list">
-                  <AdminForm
-                    fields={[
-                      { key: "companyName", label: "公司名称" },
-                      { key: "maxProjectAmount", label: "最大承接金额(元)" },
-                      { key: "minRemainingDays", label: "最低准备天数" },
-                      { key: "preferredRegions", label: "可投城市(逗号分隔)" },
-                      { key: "preferredProjectTypes", label: "项目类型(逗号分隔)" },
-                      { key: "excludedKeywords", label: "排除关键词(逗号分隔)" },
-                    ]}
-                    initial={{
-                      companyName: prefs.companyName,
-                      maxProjectAmount: String(prefs.maxProjectAmount),
-                      minRemainingDays: String(prefs.minRemainingDays),
-                      preferredRegions: prefs.preferredRegions.join(", "),
-                      preferredProjectTypes: prefs.preferredProjectTypes.join(", "),
-                      excludedKeywords: prefs.excludedKeywords.join(", "),
-                    }}
-                    onCancel={() => {}}
-                    onSubmit={data => {
-                      saveItem(`${API}/company/profile`, "PUT", {
-                        companyName: data.companyName,
-                        maxProjectAmount: Number(data.maxProjectAmount),
-                        minRemainingDays: Number(data.minRemainingDays),
-                        preferredRegions: data.preferredRegions.split(/[,，]+/).map((s: string) => s.trim()).filter(Boolean),
-                        preferredProjectTypes: data.preferredProjectTypes.split(/[,，]+/).map((s: string) => s.trim()).filter(Boolean),
-                        excludedKeywords: data.excludedKeywords.split(/[,，]+/).map((s: string) => s.trim()).filter(Boolean),
-                      });
-                    }}
-                  />
+                  <div className="admin-row">
+                    <div className="admin-row-content">
+                      <strong>{prefs.companyName}</strong>
+                      <span>最大承接：{formatAmount(prefs.maxProjectAmount)}</span>
+                      <span>最低准备：{prefs.minRemainingDays} 天</span>
+                    </div>
+                    <button className="btn btn-primary" onClick={() => setShowPrefsModal(true)}>设置</button>
+                  </div>
+                  <div style={{ marginTop: 16 }}>
+                    <p style={{ fontSize: 13, fontWeight: 600, margin: "0 0 6px" }}>可投城市</p>
+                    <div className="preference-tags">{prefs.preferredRegions.map(r => <span key={r} className="preference-tag">{r}</span>)}</div>
+                  </div>
+                  <div style={{ marginTop: 12 }}>
+                    <p style={{ fontSize: 13, fontWeight: 600, margin: "0 0 6px" }}>项目类型</p>
+                    <div className="preference-tags">{prefs.preferredProjectTypes.map(r => <span key={r} className="preference-tag">{r}</span>)}</div>
+                  </div>
+                  <div style={{ marginTop: 12 }}>
+                    <p style={{ fontSize: 13, fontWeight: 600, margin: "0 0 6px" }}>排除关键词</p>
+                    <div className="preference-tags">{prefs.excludedKeywords.map(r => <span key={r} className="preference-tag preference-tag--exclude">{r}</span>)}</div>
+                  </div>
+
+                  {showPrefsModal && (
+                    <Modal title="设置承接能力与投标偏好" onClose={() => setShowPrefsModal(false)}>
+                      <AdminForm
+                        fields={[
+                          { key: "companyName", label: "公司名称" },
+                          { key: "maxProjectAmount", label: "最大承接金额(元)" },
+                          { key: "minRemainingDays", label: "最低准备天数" },
+                          { key: "preferredRegions", label: "可投城市(逗号分隔)" },
+                          { key: "preferredProjectTypes", label: "项目类型(逗号分隔)" },
+                          { key: "excludedKeywords", label: "排除关键词(逗号分隔)" },
+                        ]}
+                        initial={{
+                          companyName: prefs.companyName,
+                          maxProjectAmount: String(prefs.maxProjectAmount),
+                          minRemainingDays: String(prefs.minRemainingDays),
+                          preferredRegions: prefs.preferredRegions.join(", "),
+                          preferredProjectTypes: prefs.preferredProjectTypes.join(", "),
+                          excludedKeywords: prefs.excludedKeywords.join(", "),
+                        }}
+                        onCancel={() => setShowPrefsModal(false)}
+                        onSubmit={data => {
+                          saveItem(`${API}/company/profile`, "PUT", {
+                            companyName: data.companyName,
+                            maxProjectAmount: Number(data.maxProjectAmount),
+                            minRemainingDays: Number(data.minRemainingDays),
+                            preferredRegions: data.preferredRegions.split(/[,，]+/).map((s: string) => s.trim()).filter(Boolean),
+                            preferredProjectTypes: data.preferredProjectTypes.split(/[,，]+/).map((s: string) => s.trim()).filter(Boolean),
+                            excludedKeywords: data.excludedKeywords.split(/[,，]+/).map((s: string) => s.trim()).filter(Boolean),
+                          });
+                          setShowPrefsModal(false);
+                        }}
+                      />
+                    </Modal>
+                  )}
                 </div>
               )}
             </div>

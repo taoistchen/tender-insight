@@ -6,6 +6,7 @@ import { companyRouter } from "./routes/company.js";
 import { crawlerRouter } from "./routes/crawler.js";
 import { healthRouter } from "./routes/health.js";
 import { tendersRouter } from "./routes/tenders.js";
+import { uploadRouter } from "./routes/upload.js";
 import { crawlerService } from "./crawler/service.js";
 
 const app = express();
@@ -15,6 +16,7 @@ app.use(express.json({ limit: "2mb" }));
 app.use("/api", healthRouter);
 app.use("/api", companyRouter);
 app.use("/api", crawlerRouter);
+app.use("/api", uploadRouter);
 app.use("/api", tendersRouter);
 
 if (fs.existsSync(config.PUBLIC_DIR)) {

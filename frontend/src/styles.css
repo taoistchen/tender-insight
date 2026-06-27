@@ -806,6 +806,133 @@ th.sortable:hover {
   color: #fff;
 }
 
+/* ─── Modal ─── */
+
+.modal-overlay {
+  align-items: center;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  justify-content: center;
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+}
+
+.modal {
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+  max-height: 85vh;
+  max-width: 640px;
+  overflow-y: auto;
+  width: 100%;
+}
+
+.modal-header {
+  align-items: center;
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  justify-content: space-between;
+  padding: 18px 24px;
+}
+
+.modal-header h3 {
+  font-size: 18px;
+  margin: 0;
+}
+
+.modal-body {
+  padding: 24px;
+}
+
+/* ─── Upload Zone ─── */
+
+.upload-zone {
+  background: #faf7f2;
+  border: 2px dashed #d5cec4;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  margin-bottom: 20px;
+  padding: 32px 24px;
+  text-align: center;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.upload-zone:hover,
+.upload-zone--active {
+  border-color: var(--color-cyan);
+  background: #f0faf9;
+}
+
+.upload-zone-icon {
+  font-size: 32px;
+  margin: 0 0 8px;
+}
+
+.upload-zone p {
+  color: var(--color-slate);
+  font-size: 14px;
+  margin: 4px 0;
+}
+
+.upload-zone-hint {
+  color: var(--color-muted) !important;
+  font-size: 12px !important;
+}
+
+/* ─── Extracted Results ─── */
+
+.extracted-results {
+  background: #f0faf9;
+  border: 1px solid #b8ddd6;
+  border-radius: var(--radius-md);
+  margin-bottom: 20px;
+  padding: 16px;
+}
+
+.extracted-title {
+  color: var(--color-rec-text);
+  font-size: 14px;
+  font-weight: 700;
+  margin: 0 0 12px;
+}
+
+.extracted-row {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #d5ece6;
+  border-radius: var(--radius-sm);
+  display: flex;
+  font-size: 14px;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  padding: 10px 14px;
+}
+
+.extracted-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.confidence {
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+}
+
+.confidence--high {
+  background: var(--color-rec-bg);
+  color: var(--color-rec-text);
+}
+
+.confidence--medium {
+  background: var(--color-manual-bg);
+  color: var(--color-manual-text);
+}
+
 /* ─── Reduced motion ─── */
 
 @media (prefers-reduced-motion: reduce) {
