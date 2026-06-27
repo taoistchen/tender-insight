@@ -1,0 +1,175 @@
+:root {
+  color: #17202a;
+  background: #f4f7f6;
+  font-family:
+    Inter, "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", Arial,
+    sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.app-shell {
+  min-height: 100vh;
+  padding: 32px;
+}
+
+.topbar {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+.eyebrow {
+  color: #60736f;
+  font-size: 14px;
+  margin: 0 0 6px;
+}
+
+h1,
+h2,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  font-size: 32px;
+  margin-bottom: 0;
+}
+
+.status {
+  background: #0f766e;
+  border-radius: 999px;
+  color: white;
+  font-size: 13px;
+  padding: 6px 12px;
+}
+
+.panel {
+  background: white;
+  border: 1px solid #dbe5e2;
+  border-radius: 8px;
+  padding: 24px;
+}
+
+.metrics-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 20px;
+}
+
+.metric {
+  background: white;
+  border: 1px solid #dbe5e2;
+  border-radius: 8px;
+  padding: 18px;
+}
+
+.metric span {
+  color: #60736f;
+  display: block;
+  font-size: 14px;
+}
+
+.metric strong {
+  display: block;
+  font-size: 30px;
+  line-height: 1.2;
+  margin-top: 8px;
+}
+
+.content-grid {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: minmax(0, 1fr) 360px;
+}
+
+.panel-header {
+  align-items: center;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+
+button {
+  background: #0f766e;
+  border: 0;
+  border-radius: 6px;
+  color: white;
+  cursor: pointer;
+  font: inherit;
+  padding: 9px 14px;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+table {
+  border-collapse: collapse;
+  min-width: 760px;
+  width: 100%;
+}
+
+th,
+td {
+  border-bottom: 1px solid #e6eeeb;
+  font-size: 14px;
+  padding: 12px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+th {
+  color: #60736f;
+  font-weight: 600;
+}
+
+.decision {
+  background: #e6f4ef;
+  border-radius: 999px;
+  color: #0f766e;
+  display: inline-block;
+  padding: 4px 8px;
+  white-space: nowrap;
+}
+
+.qualification-list {
+  display: grid;
+  gap: 10px;
+  list-style: none;
+  margin: 18px 0 0;
+  padding: 0;
+}
+
+.qualification-list li {
+  background: #f4f7f6;
+  border: 1px solid #dbe5e2;
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+
+@media (max-width: 900px) {
+  .app-shell {
+    padding: 20px;
+  }
+
+  .metrics-grid,
+  .content-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .topbar,
+  .panel-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
