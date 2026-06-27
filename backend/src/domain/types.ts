@@ -33,6 +33,10 @@ export interface TenderNotice {
   budgetAmount?: number;
   deadlineTime?: Date;
   qualificationRequirements: QualificationRequirement[];
+  /** Raw personnel requirement strings extracted from tender text. */
+  personnelRequirements?: string[];
+  /** Raw performance requirement strings extracted from tender text. */
+  performanceRequirements?: string[];
 }
 
 export interface TenderAnalysisResult {

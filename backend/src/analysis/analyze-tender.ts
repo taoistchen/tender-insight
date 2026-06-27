@@ -10,6 +10,50 @@ export interface AnalyzeTenderOptions {
   now?: Date;
 }
 
+/** Common suffix patterns in Chinese qualification names that carry no distinguishing information. */
+const QUALIFICATION_SUFFIX_PATTERN = /(?:施工总承包|专业承包|工程|施工|承包)/g;
+
+/**
+ * Compare two Chinese qualification names with fuzzy character-set matching
+ * to tolerate word-order variations common in tender documents.
+ *
+ * Examples of variation handled:
+ *   - "建筑装修装饰工程专业承包" vs "建筑装饰装修工程专业承包"
+ *   - "消防设施工程专业承包" vs "消防设施专业承包"
+ */
+function qualificationNameMatches(
+  requirementName: string,
+  companyQualName: string
+): boolean {
+  // Direct substring match (either direction)
+  if (
+    requirementName.includes(companyQualName) ||
+    companyQualName.includes(requirementName)
+  ) {
+    return true;
+  }
+
+  // Strip generic suffixes and compare the distinctive core
+  const reqCore = requirementName.replace(QUALIFICATION_SUFFIX_PATTERN, "");
+  const qualCore = companyQualName.replace(QUALIFICATION_SUFFIX_PATTERN, "");
+
+  // After stripping suffixes the cores may be identical
+  if (reqCore === qualCore) {
+    return true;
+  }
+
+  // Character-set Jaccard similarity on the core — handles word-order flips
+  // like "装修装饰" vs "装饰装修"
+  const reqChars = new Set(reqCore);
+  const qualChars = new Set(qualCore);
+  const intersection = [...reqChars].filter((c) => qualChars.has(c)).length;
+  const union = reqChars.size + qualChars.size - intersection;
+
+  // Threshold of 0.7 catches genuine variants while rejecting
+  // unrelated qualifications like "市政" vs "建筑"
+  return intersection / union >= 0.7;
+}
+
 export function analyzeTender(
   tender: TenderNotice,
   company: CompanyProfile,
@@ -49,11 +93,26 @@ export function analyzeTender(
   matchedPoints.push(...qualificationResult.matchedPoints);
   riskPoints.push(...qualificationResult.riskPoints);
 
-  score += 20;
-  matchedPoints.push("未发现明确人员硬性限制");
+  // Personnel matching: if tender explicitly lists personnel requirements, report them
+  // for traceability. Full matching against company personnel records is a later feature.
+  if (tender.personnelRequirements && tender.personnelRequirements.length > 0) {
+    riskPoints.push(
+      `公告明确要求人员：${tender.personnelRequirements.join("；")}。人员匹配功能待实现，需人工核对`
+    );
+  } else {
+    score += 20;
+    matchedPoints.push("未发现明确人员硬性限制");
+  }
 
-  score += 15;
-  matchedPoints.push("未发现明确业绩硬性限制");
+  // Performance matching: if tender explicitly lists performance requirements, report them
+  if (tender.performanceRequirements && tender.performanceRequirements.length > 0) {
+    riskPoints.push(
+      `公告明确要求业绩：${tender.performanceRequirements.join("；")}。业绩匹配功能待实现，需人工核对`
+    );
+  } else {
+    score += 15;
+    matchedPoints.push("未发现明确业绩硬性限制");
+  }
 
   if (tender.budgetAmount !== undefined && tender.budgetAmount <= company.maxProjectAmount) {
     score += 10;
@@ -101,7 +160,7 @@ function matchQualifications(tender: TenderNotice, company: CompanyProfile) {
 
   for (const requirement of tender.qualificationRequirements) {
     const actual = company.qualifications.find((qualification) =>
-      requirement.name.includes(qualification.name)
+      qualificationNameMatches(requirement.name, qualification.name)
     );
 
     if (!actual || !levelSatisfies(actual.level, requirement.level)) {
@@ -123,11 +182,12 @@ function matchQualifications(tender: TenderNotice, company: CompanyProfile) {
 }
 
 function mapDecision(score: number, riskPoints: string[]): Decision {
+  // Aligned with spec: score 85-100 → recommended, 70-84 → watch,
+  // 50-69 → manual_review, <50 → not_recommended
+  // Hard rejections (excluded keyword, wrong city, missing qual, expired, over budget)
+  // are handled before this function and return "rejected" directly.
   if (score >= 85 && riskPoints.length === 0) {
     return "recommended";
-  }
-  if (riskPoints.length > 0 && score >= 50) {
-    return "manual_review";
   }
   if (score >= 70) {
     return "watch";

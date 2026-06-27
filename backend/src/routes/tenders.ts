@@ -17,7 +17,11 @@ const sampleTender: TenderNotice = {
       name: "建筑装修装饰工程专业承包",
       level: "二级"
     }
-  ]
+  ],
+  personnelRequirements: [
+    "项目负责人：建筑工程专业 二级建造师及以上"
+  ],
+  performanceRequirements: []
 };
 
 tendersRouter.get("/tenders", (_request, response) => {
