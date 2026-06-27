@@ -3,6 +3,9 @@ import { seedCompanyProfile } from "../seed/company-profile.js";
 import type { TenderNotice } from "../domain/types.js";
 import type { TenderAnalysisResult } from "../domain/types.js";
 import { NanjingCrawler } from "./sites/nanjing.js";
+import { LianyungangCrawler } from "./sites/lianyungang.js";
+import { ZhenjiangCrawler } from "./sites/zhenjiang.js";
+import { HuaianCrawler } from "./sites/huaian.js";
 import type { CrawlJob, TenderCrawler, TenderListItem } from "./types.js";
 
 /** A tender with its analysis result, as returned by the API. */
@@ -32,6 +35,9 @@ class CrawlerService {
 
   constructor() {
     this.crawlers.push(new NanjingCrawler());
+    this.crawlers.push(new LianyungangCrawler());
+    this.crawlers.push(new ZhenjiangCrawler());
+    this.crawlers.push(new HuaianCrawler());
   }
 
   /* ─── Public API ─── */
