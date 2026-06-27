@@ -88,7 +88,15 @@ function DatePicker({ value, onChange }: { value: string; onChange: (v: string) 
   }, []);
 
   const d = value ? new Date(value) : new Date();
-  const year = d.getFullYear(); const month = d.getMonth();
+  const [viewYear, setViewYear] = useState(d.getFullYear());
+  const [viewMonth, setViewMonth] = useState(d.getMonth());
+
+  useEffect(() => { const v = value ? new Date(value) : new Date(); setViewYear(v.getFullYear()); setViewMonth(v.getMonth()); }, [value]);
+
+  function prevMonth() { if (viewMonth === 0) { setViewMonth(11); setViewYear(y => y - 1); } else { setViewMonth(m => m - 1); } }
+  function nextMonth() { if (viewMonth === 11) { setViewMonth(0); setViewYear(y => y + 1); } else { setViewMonth(m => m + 1); } }
+
+  const year = viewYear; const month = viewMonth;
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const firstDay = new Date(year, month, 0).getDay();
   const months = ["一月","二月","三月","四月","五月","六月","七月","八月","九月","十月","十一月","十二月"];
@@ -109,9 +117,11 @@ function DatePicker({ value, onChange }: { value: string; onChange: (v: string) 
       {open && (
         <div className="datepicker-dropdown">
           <div className="datepicker-nav">
-            <button type="button" onClick={() => onChange(`${year}-${String(month).padStart(2,"0")}-01`)} disabled={month === 0}>&lt;</button>
+            <button type="button" className="datepicker-nav-double" onClick={() => setViewYear(y => y - 1)} title="上一年">«</button>
+            <button type="button" onClick={prevMonth}>‹</button>
             <span>{year}年 {months[month]}</span>
-            <button type="button" onClick={() => onChange(`${year}-${String(month+2).padStart(2,"0")}-01`)} disabled={month === 11}>&gt;</button>
+            <button type="button" onClick={nextMonth}>›</button>
+            <button type="button" className="datepicker-nav-double" onClick={() => setViewYear(y => y + 1)} title="下一年">»</button>
           </div>
           <div className="datepicker-weekdays">{weekDays.map(w => <span key={w}>{w}</span>)}</div>
           <div className="datepicker-grid">

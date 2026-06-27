@@ -915,7 +915,9 @@ th.sortable:hover {
   cursor: pointer; font-size: 14px; padding: 2px 8px;
 }
 .datepicker-nav button:hover { border-color: #1677ff; color: #1677ff; }
-.datepicker-nav button:disabled { opacity: 0.3; cursor: default; }
+.datepicker-nav-double {
+  font-size: 12px !important; letter-spacing: -2px; padding: 2px 6px !important;
+}
 .datepicker-weekdays {
   display: grid; font-size: 11px; color: #8c8c8c; font-weight: 600;
   grid-template-columns: repeat(7, 1fr); margin-bottom: 4px; text-align: center;
