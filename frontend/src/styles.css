@@ -763,6 +763,7 @@ th.sortable:hover {
 .crawler-jobs {
   display: grid;
   gap: 12px;
+  min-width: 0;
 }
 
 .crawler-job {
@@ -772,6 +773,7 @@ th.sortable:hover {
   border-radius: var(--radius-md);
   display: grid;
   gap: 12px;
+  min-width: 0;
   padding: 16px;
 }
 
@@ -796,6 +798,11 @@ th.sortable:hover {
   display: flex;
   gap: 12px;
   justify-content: space-between;
+  min-width: 0;
+}
+
+.crawler-job-main > div {
+  min-width: 0;
 }
 
 .crawler-job-title {
@@ -803,6 +810,7 @@ th.sortable:hover {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  min-width: 0;
 }
 
 .crawler-job-title strong {
@@ -814,6 +822,7 @@ th.sortable:hover {
 .crawler-job-meta {
   color: var(--color-muted);
   font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
 .crawler-job-meta {
@@ -821,6 +830,7 @@ th.sortable:hover {
   flex-wrap: wrap;
   gap: 10px;
   margin-top: 4px;
+  min-width: 0;
 }
 
 .crawler-status {
@@ -855,6 +865,7 @@ th.sortable:hover {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  min-width: 0;
 }
 
 .crawler-job-stats span {
@@ -873,12 +884,15 @@ th.sortable:hover {
   color: var(--color-reject-text);
   font-size: 12px;
   font-weight: 600;
+  min-width: 0;
+  overflow-wrap: anywhere;
   padding: 8px 10px;
 }
 
 .crawler-attempts {
   display: grid;
   gap: 6px;
+  min-width: 0;
 }
 
 .crawler-attempt {
@@ -891,7 +905,14 @@ th.sortable:hover {
   flex-wrap: wrap;
   font-size: 12px;
   gap: 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
   padding: 7px 9px;
+}
+
+.crawler-attempt span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .crawler-attempt span:first-child {

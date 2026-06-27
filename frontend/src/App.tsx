@@ -301,6 +301,7 @@ export function App() {
   const [selectedSourceKey, setSelectedSourceKey] = useState("construction");
   const [crawlPages, setCrawlPages] = useState(1);
   const [crawlLoading, setCrawlLoading] = useState(false);
+  const [crawlError, setCrawlError] = useState<string | null>(null);
 
   // Upload & AI extraction
   const [uploading, setUploading] = useState(false);
@@ -373,8 +374,9 @@ export function App() {
   async function startRecipeCrawl() {
     if (!selectedSource) return;
     setCrawlLoading(true);
+    setCrawlError(null);
     try {
-      await fetch(`${API}/crawler/run`, {
+      const response = await fetch(`${API}/crawler/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -383,9 +385,25 @@ export function App() {
           maxPages: Math.min(crawlPages, selectedSource.maxPages)
         })
       });
+      if (!response.ok) {
+        let detail = "";
+        try {
+          const data = await response.clone().json();
+          if (typeof data === "string") detail = data;
+          else if (data && typeof data === "object") {
+            const body = data as { message?: string; error?: string; detail?: string };
+            detail = body.message ?? body.error ?? body.detail ?? "";
+          }
+        } catch {
+          try { detail = await response.text(); } catch { detail = ""; }
+        }
+        setCrawlError(detail || `启动采集失败：HTTP ${response.status}`);
+        return;
+      }
       await Promise.all([fetchCrawlerData(), fetchTenders()]);
     } catch (err) {
       console.error("Crawler start failed:", err);
+      setCrawlError(err instanceof Error ? err.message : "启动采集失败，请稍后重试。");
     } finally {
       setCrawlLoading(false);
     }
@@ -586,6 +604,7 @@ export function App() {
               {crawlLoading ? "启动中..." : "开始采集"}
             </button>
           </div>
+          {crawlError && <div className="crawler-error" role="alert">{crawlError}</div>}
 
           {selectedSource && (
             <div className="crawler-source-meta">
