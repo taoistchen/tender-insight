@@ -104,9 +104,9 @@ describe("analyzeTender", () => {
   });
 
   describe("watch", () => {
-    it("returns watch for score 70-84 even with risk points present", () => {
+    it("returns manual review for score 70-84 when risk points require human verification", () => {
       // Tender with no explicit qualification requirements (triggers risk point)
-      // but otherwise matching — should be "watch", not "manual_review"
+      // but otherwise matching — should still require human review.
       const result = analyzeTender(
         {
           ...baseTender,
@@ -120,7 +120,8 @@ describe("analyzeTender", () => {
 
       // Score breakdown: region 10 + type 15? + qual (no req→passed+10) + personnel 20 + perf 15 + amount 10 = 80
       // With risk point for 资质要求未明确
-      expect(result.decision).toBe("watch");
+      expect(result.decision).toBe("manual_review");
+      expect(result.manualReviewRequired).toBe(true);
       expect(result.matchScore).toBeGreaterThanOrEqual(70);
     });
   });
@@ -198,6 +199,8 @@ describe("analyzeTender", () => {
       );
 
       expect(result.riskPoints.some(p => p.includes("人员匹配功能待实现"))).toBe(true);
+      expect(result.decision).toBe("manual_review");
+      expect(result.manualReviewRequired).toBe(true);
     });
   });
 });

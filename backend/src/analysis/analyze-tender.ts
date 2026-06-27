@@ -64,8 +64,14 @@ export function analyzeTender(
   const riskPoints: string[] = [];
   let score = 0;
 
+  // Excluded-service keywords are checked against the title only.
+  // The tender title tells you what the tender IS FOR (e.g. "监理招标公告"
+  // means the tender is for supervision services).  Construction tenders
+  // routinely mention "监理单位" in their body text without being
+  // supervision-service tenders, so we avoid false positives by scoping
+  // this check to the title.
   const excludedKeyword = company.excludedKeywords.find((keyword) =>
-    `${tender.title}\n${tender.contentText}`.includes(keyword)
+    tender.title.includes(keyword)
   );
   if (excludedKeyword) {
     return rejected(0, matchedPoints, [`包含排除关键词：${excludedKeyword}`]);
@@ -186,6 +192,9 @@ function mapDecision(score: number, riskPoints: string[]): Decision {
   // 50-69 → manual_review, <50 → not_recommended
   // Hard rejections (excluded keyword, wrong city, missing qual, expired, over budget)
   // are handled before this function and return "rejected" directly.
+  if (riskPoints.length > 0 && score >= 50) {
+    return "manual_review";
+  }
   if (score >= 85 && riskPoints.length === 0) {
     return "recommended";
   }
