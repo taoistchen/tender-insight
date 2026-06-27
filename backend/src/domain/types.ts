@@ -16,6 +16,21 @@ export interface CompanyQualification {
   validTo?: Date;
 }
 
+export interface CompanyPersonnel {
+  personName: string;
+  certificateType?: string;
+  major?: string;
+  level?: string;
+  validTo?: Date;
+}
+
+export interface CompanyPerformance {
+  projectName: string;
+  projectType?: string;
+  amount?: number;
+  completionDate?: Date;
+}
+
 export interface CompanyProfile {
   companyName: string;
   preferredRegions: string[];
@@ -25,6 +40,33 @@ export interface CompanyProfile {
   minProjectAmount: number;
   minRemainingDays: number;
   qualifications: CompanyQualification[];
+  personnel?: CompanyPersonnel[];
+  performances?: CompanyPerformance[];
+}
+
+export type TenderLinkKind = "detail" | "document" | "external" | "other";
+
+export interface TenderResolvedLink {
+  url: string;
+  label: string;
+  sourcePageUrl: string;
+  kind: TenderLinkKind;
+}
+
+export type TenderAttachmentStatus =
+  | "linked"
+  | "parsed"
+  | "unsupported"
+  | "failed";
+
+export interface TenderAttachment {
+  url: string;
+  label: string;
+  sourcePageUrl: string;
+  contentType?: string;
+  status: TenderAttachmentStatus;
+  textContent?: string;
+  error?: string;
 }
 
 export interface TenderNotice {
@@ -32,6 +74,10 @@ export interface TenderNotice {
   title: string;
   url: string;
   contentText: string;
+  sourceHtml?: string;
+  resolvedLinks?: TenderResolvedLink[];
+  attachments?: TenderAttachment[];
+  documentTexts?: string[];
   budgetAmount?: number;
   deadlineTime?: Date;
   qualificationRequirements: QualificationRequirement[];

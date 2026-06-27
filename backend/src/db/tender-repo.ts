@@ -7,6 +7,7 @@ interface TenderRow {
   city: string;
   title: string;
   content_text: string | null;
+  source_html: string | null;
   budget_amount: string | null;
   deadline_time: string | null;
   decision: string;
@@ -18,6 +19,16 @@ interface TenderRow {
 
 interface QualRow { url: string; name: string; level: string; }
 interface ReqRow { url: string; requirement: string; }
+interface DocRow {
+  url: string;
+  document_url: string;
+  label: string | null;
+  source_page_url: string | null;
+  content_type: string | null;
+  status: string;
+  text_content: string | null;
+  error: string | null;
+}
 
 export async function upsertTender(
   tender: EnrichedTender
@@ -31,11 +42,12 @@ export async function upsertTender(
     const tenderResult = await client.query(
       `INSERT INTO tender_notice
          (url, city, title, source_site, content_text,
-          budget_amount, deadline_time, publish_date)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+          source_html, budget_amount, deadline_time, publish_date)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
        ON CONFLICT (url) DO UPDATE SET
          title = EXCLUDED.title,
          content_text = EXCLUDED.content_text,
+         source_html = EXCLUDED.source_html,
          budget_amount = EXCLUDED.budget_amount,
          deadline_time = EXCLUDED.deadline_time
        RETURNING id, (xmax = 0) AS is_new`,
@@ -45,6 +57,7 @@ export async function upsertTender(
         tender.title,
         tender.city,
         tender.contentText ?? "",
+        tender.sourceHtml ?? null,
         tender.budgetAmount ?? null,
         tender.deadlineTime ?? null,
         null
@@ -91,6 +104,35 @@ export async function upsertTender(
       );
     }
 
+    await client.query("DELETE FROM tender_document WHERE tender_id = $1", [
+      tenderId
+    ]);
+    for (const attachment of tender.attachments ?? []) {
+      await client.query(
+        `INSERT INTO tender_document
+           (tender_id, url, label, source_page_url, content_type,
+            status, text_content, error)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+         ON CONFLICT (tender_id, url) DO UPDATE SET
+           label = EXCLUDED.label,
+           source_page_url = EXCLUDED.source_page_url,
+           content_type = EXCLUDED.content_type,
+           status = EXCLUDED.status,
+           text_content = EXCLUDED.text_content,
+           error = EXCLUDED.error`,
+        [
+          tenderId,
+          attachment.url,
+          attachment.label,
+          attachment.sourcePageUrl,
+          attachment.contentType ?? null,
+          attachment.status,
+          attachment.textContent ?? null,
+          attachment.error ?? null
+        ]
+      );
+    }
+
     // Upsert analysis
     const analysis = tender.analysis;
     await client.query(
@@ -129,6 +171,7 @@ export async function getAllTenders(): Promise<EnrichedTender[]> {
   const result = await pool.query(
     `SELECT
        tn.url, tn.city, tn.title, tn.content_text,
+       tn.source_html,
        tn.budget_amount, tn.deadline_time,
        ta.decision, ta.match_score,
        ta.matched_points, ta.risk_points,
@@ -149,6 +192,7 @@ export async function getAllTenders(): Promise<EnrichedTender[]> {
       city: row.city,
       title: row.title,
       contentText: row.content_text ?? "",
+      sourceHtml: row.source_html ?? undefined,
       budgetAmount: row.budget_amount
         ? Number(row.budget_amount)
         : undefined,
@@ -158,6 +202,8 @@ export async function getAllTenders(): Promise<EnrichedTender[]> {
       qualificationRequirements: qualifications,
       personnelRequirements: personnel,
       performanceRequirements: performance,
+      attachments: [],
+      documentTexts: [],
       analysis: {
         decision: row.decision,
         matchScore: row.match_score,
@@ -228,6 +274,43 @@ export async function loadRequirements(
     t.qualificationRequirements = qualMap.get(t.url) ?? [];
     t.personnelRequirements = persMap.get(t.url) ?? [];
     t.performanceRequirements = perfMap.get(t.url) ?? [];
+  }
+
+  const docResult = await pool.query(
+    `SELECT tn.url,
+            td.url AS document_url,
+            td.label,
+            td.source_page_url,
+            td.content_type,
+            td.status,
+            td.text_content,
+            td.error
+     FROM tender_document td
+     JOIN tender_notice tn ON tn.id = td.tender_id
+     WHERE tn.url = ANY($1)`,
+    [urls]
+  );
+  const docMap = new Map<string, DocRow[]>();
+  for (const row of docResult.rows as DocRow[]) {
+    const list = docMap.get(row.url) ?? [];
+    list.push(row);
+    docMap.set(row.url, list);
+  }
+
+  for (const t of tenders) {
+    const docs = docMap.get(t.url) ?? [];
+    t.attachments = docs.map((doc) => ({
+      url: doc.document_url,
+      label: doc.label ?? "",
+      sourcePageUrl: doc.source_page_url ?? t.url,
+      contentType: doc.content_type ?? undefined,
+      status: doc.status as never,
+      textContent: doc.text_content ?? undefined,
+      error: doc.error ?? undefined
+    }));
+    t.documentTexts = t.attachments
+      .map((attachment) => attachment.textContent)
+      .filter((text): text is string => Boolean(text));
   }
 }
 

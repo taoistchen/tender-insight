@@ -1,5 +1,7 @@
-import { extractTenderFields } from "../../tender/extract-tender-fields.js";
 import type { TenderNotice } from "../../domain/types.js";
+import { extractDeepTenderDetail } from "../../tender/detail-extraction.js";
+import { fetchTenderDocuments } from "../../tender/document-fetcher.js";
+import { extractTenderFields } from "../../tender/extract-tender-fields.js";
 import type {
   CrawlPageResult,
   TenderCrawler,
@@ -9,81 +11,54 @@ import type {
 const BASE_URL = "http://ggzy.lyg.gov.cn";
 const LIST_PATH = "/lygweb/jyxx/001001/001001002";
 const LIST_URL = `${BASE_URL}${LIST_PATH}/tradeInfo.html`;
+const PAGE_URL = (page: number) => `${BASE_URL}${LIST_PATH}/${page}.html`;
 
-/**
- * Crawler for 连云港市公共资源交易平台 — 建设工程 → 招标公告.
- *
- * Page structure mirrors the Nanjing platform:
- * server-rendered HTML listing, detail pages with meta tags and
- * `<div class="con">` content blocks.
- */
 export class LianyungangCrawler implements TenderCrawler {
   readonly siteName = "连云港市公共资源交易平台";
   readonly city = "连云港";
 
-  async fetchList(_page?: number): Promise<CrawlPageResult> {
-    const html = await this.#fetchText(LIST_URL);
-    return this.#parseListHtml(html);
+  async fetchList(page = 1): Promise<CrawlPageResult> {
+    const html = await this.#fetchText(page === 1 ? LIST_URL : PAGE_URL(page));
+    return this.#parseListHtml(html, page);
   }
 
   async fetchDetail(item: TenderListItem): Promise<TenderNotice> {
     const html = await this.#fetchText(item.detailUrl);
-
     const title = this.#extractMeta(html, "ArticleTitle") ?? item.projectName;
     const pubDate = this.#extractMeta(html, "PubDate") ?? item.publishDate;
-
-    const conStart = html.indexOf('<div class="con"');
-    let rawHtml = "";
-    if (conStart >= 0) {
-      let depth = 0;
-      let i = conStart;
-      while (i < html.length) {
-        const slice = html.slice(i);
-        const openMatch = slice.match(/<div[\s>]/i);
-        const closeMatch = slice.match(/<\/div>/i);
-        const openIdx = openMatch ? openMatch.index! : Infinity;
-        const closeIdx = closeMatch ? closeMatch.index! : Infinity;
-
-        if (openIdx < closeIdx) {
-          depth++;
-          i += openIdx + openMatch![0].length;
-        } else if (closeIdx < Infinity) {
-          depth--;
-          i += closeIdx + 6;
-          if (depth === 0) {
-            rawHtml = html.slice(conStart, i);
-            break;
-          }
-        } else {
-          break;
-        }
-      }
-    }
-
-    const contentText = this.#htmlToText(rawHtml);
-    const fields = extractTenderFields(contentText);
-
+    const detail = await extractDeepTenderDetail({
+      entryUrl: item.detailUrl,
+      initialHtml: html,
+      fetchText: (url) => this.#fetchText(url)
+    });
+    const attachments = await fetchTenderDocuments(detail.attachments);
+    const documentTexts = attachments
+      .map((attachment) => attachment.textContent)
+      .filter((text): text is string => Boolean(text));
+    const extractionText = [detail.contentText, ...documentTexts].join("\n\n");
+    const fields = extractTenderFields(extractionText);
     const deadlineStr =
-      this.#extractDeadlineFromHtml(html) ??
-      this.#extractDeadlineFromText(contentText);
+      this.#extractDeadline(html) ?? this.#extractDeadline(extractionText);
 
     return {
       city: this.city,
       url: item.detailUrl,
       title,
-      contentText:
-        `${title}\n发布时间：${pubDate}\n${contentText}`.slice(0, 16_384),
+      sourceHtml: detail.sourceHtml,
+      resolvedLinks: detail.resolvedLinks,
+      attachments,
+      documentTexts,
+      contentText: `${title}\nPublished: ${pubDate}\n${extractionText}`.slice(
+        0,
+        32_768
+      ),
       budgetAmount: fields.budgetAmount ?? item.budgetAmount,
-      deadlineTime: deadlineStr
-        ? this.#parseChineseDate(deadlineStr)
-        : fields.deadlineTime,
+      deadlineTime: deadlineStr ? parseDate(deadlineStr) : fields.deadlineTime,
       qualificationRequirements: fields.qualificationRequirements,
       personnelRequirements: fields.personnelRequirements,
       performanceRequirements: fields.performanceRequirements
     };
   }
-
-  /* ─── Private ─── */
 
   async #fetchText(url: string): Promise<string> {
     const controller = new AbortController();
@@ -99,22 +74,16 @@ export class LianyungangCrawler implements TenderCrawler {
         }
       });
       if (!response.ok) throw new Error(`HTTP ${response.status} for ${url}`);
-      const buffer = Buffer.from(await response.arrayBuffer());
-      try {
-        return new TextDecoder("utf-8", { fatal: true }).decode(buffer);
-      } catch {
-        return new TextDecoder("gbk", { fatal: false }).decode(buffer);
-      }
+      return decodeBuffer(Buffer.from(await response.arrayBuffer()));
     } finally {
       clearTimeout(timeout);
     }
   }
 
-  #parseListHtml(html: string): CrawlPageResult {
+  #parseListHtml(html: string, page: number): CrawlPageResult {
     const items: TenderListItem[] = [];
-
     const itemRegex =
-      /<a\s+href="(\/lygweb\/jyxx\/001001\/001001002\/\d+\/[a-f0-9-]+\.html)"\s+target="_blank"\s+title="([^"]*)"/gi;
+      /<a\s+href="(\/lygweb\/jyxx\/001001\/001001002\/\d+\/[a-z0-9-]+\.html)"\s+target="_blank"\s+title="([^"]*)"/gi;
 
     let match;
     while ((match = itemRegex.exec(html)) !== null) {
@@ -124,12 +93,16 @@ export class LianyungangCrawler implements TenderCrawler {
         sectionName: "",
         budgetAmount: undefined,
         publishDate: match[1].match(/\/(\d{8})\//)?.[1] ?? "",
-        detailUrl: `${BASE_URL}${match[1]}`,
+        detailUrl: new URL(match[1], BASE_URL).toString(),
         sourceSite: this.siteName
       });
     }
 
-    return { items, totalPages: 1, currentPage: 1 };
+    const pageMatch =
+      html.match(/<span[^>]*id="index\d+"[^>]*>\s*\d+\/(\d+)\s*<\/span>/i) ??
+      html.match(/共\s*(\d+)\s*页/i);
+    const totalPages = pageMatch ? Number.parseInt(pageMatch[1], 10) : 1;
+    return { items, totalPages, currentPage: page };
   }
 
   #extractMeta(html: string, name: string): string | null {
@@ -139,40 +112,29 @@ export class LianyungangCrawler implements TenderCrawler {
     return match ? match[1].trim() : null;
   }
 
-  #extractDeadlineFromHtml(html: string): string | null {
-    const match = html.match(
-      /投标(?:文件)?递交截止时间\s*[:：]\s*(\d{4}-\d{1,2}-\d{1,2}\s+\d{1,2}[:：]\d{1,2})/
-    );
-    return match ? match[1] : null;
-  }
-
-  #extractDeadlineFromText(text: string): string | null {
+  #extractDeadline(text: string): string | null {
     const match = text.match(
-      /投标(?:文件)?递交?截止时间[：:]\s*(\d{4}[-/年]\d{1,2}[-/月]\d{1,2}日?\s*\d{1,2}[:：]\d{1,2})/
+      /(?:投标|递交)(?:文件)?(?:截止|递交截止)时间\s*[:：]?\s*(\d{4}[-/年]\d{1,2}[-/月]\d{1,2}日?\s*\d{1,2}[:：]\d{1,2})/
     );
     return match ? match[1] : null;
   }
+}
 
-  #parseChineseDate(raw: string): Date | undefined {
-    let normalized = raw
-      .replace(/年/g, "-").replace(/月/g, "-").replace(/日/g, "").trim();
-    normalized = normalized.replace(/(\d{1,2})[时](\d{1,2})/, "$1:$2");
-    const parsed = new Date(normalized);
-    return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+function decodeBuffer(buffer: Buffer): string {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(buffer);
+  } catch {
+    return new TextDecoder("gbk", { fatal: false }).decode(buffer);
   }
+}
 
-  #htmlToText(html: string): string {
-    return html
-      .replace(/<script[\s\S]*?<\/script>/gi, "")
-      .replace(/<style[\s\S]*?<\/style>/gi, "")
-      .replace(/<\/(?:div|p|h\d|li|tr|br)[^>]*>/gi, "\n")
-      .replace(/<br\s*\/?>/gi, "\n")
-      .replace(/<[^>]*>/g, "")
-      .replace(/&nbsp;/g, " ")
-      .replace(/&lt;/g, "<").replace(/&gt;/g, ">")
-      .replace(/&amp;/g, "&").replace(/&quot;/g, '"')
-      .replace(/[ \t]+/g, " ")
-      .replace(/\n{3,}/g, "\n\n")
-      .trim();
-  }
+function parseDate(raw: string): Date | undefined {
+  const normalized = raw
+    .replace(/年/g, "-")
+    .replace(/月/g, "-")
+    .replace(/日/g, "")
+    .replace("：", ":")
+    .trim();
+  const parsed = new Date(normalized);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed;
 }

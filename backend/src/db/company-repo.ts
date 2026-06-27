@@ -1,4 +1,5 @@
 import { pool } from "./pool.js";
+import type { CompanyProfile as AnalysisCompanyProfile } from "../domain/types.js";
 
 /* ─── Types ─── */
 
@@ -227,6 +228,47 @@ function rowToPers(r: Record<string, unknown>): CompanyPersonnel {
 export async function getPerformances(): Promise<CompanyPerformance[]> {
   const r = await pool.query("SELECT * FROM company_performance ORDER BY id");
   return r.rows.map(rowToPerf);
+}
+
+export async function getCompanyProfileForAnalysis(): Promise<AnalysisCompanyProfile | null> {
+  const profile = await getProfile();
+  if (!profile) return null;
+
+  const [qualifications, personnel, performances] = await Promise.all([
+    getQualifications(),
+    getPersonnel(),
+    getPerformances()
+  ]);
+
+  return {
+    companyName: profile.companyName,
+    maxProjectAmount: profile.maxProjectAmount,
+    minProjectAmount: profile.minProjectAmount,
+    minRemainingDays: profile.minRemainingDays,
+    preferredRegions: profile.preferredRegions,
+    preferredProjectTypes: profile.preferredProjectTypes,
+    excludedKeywords: profile.excludedKeywords,
+    qualifications: qualifications.map((q) => ({
+      name: q.name,
+      level: q.level,
+      validTo: q.validTo ? new Date(`${q.validTo}T00:00:00+08:00`) : undefined
+    })),
+    personnel: personnel.map((p) => ({
+      personName: p.personName,
+      certificateType: p.certificateType ?? undefined,
+      major: p.major ?? undefined,
+      level: p.level ?? undefined,
+      validTo: p.validTo ? new Date(`${p.validTo}T00:00:00+08:00`) : undefined
+    })),
+    performances: performances.map((p) => ({
+      projectName: p.projectName,
+      projectType: p.projectType ?? undefined,
+      amount: p.amount ?? undefined,
+      completionDate: p.completionDate
+        ? new Date(`${p.completionDate}T00:00:00+08:00`)
+        : undefined
+    }))
+  };
 }
 
 export async function addPerformance(data: {

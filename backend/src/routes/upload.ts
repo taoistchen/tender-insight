@@ -1,3 +1,4 @@
+import type { Request } from "express";
 import { Router } from "express";
 import multer from "multer";
 import { addQualification } from "../db/company-repo.js";
@@ -21,11 +22,21 @@ interface ExtractedQual {
   confidence: "high" | "medium" | "low";
 }
 
+interface UploadedMemoryFile {
+  originalname: string;
+  mimetype?: string;
+  buffer: Buffer;
+}
+
+type MulterFilesRequest = Request & {
+  files?: UploadedMemoryFile[];
+};
+
 uploadRouter.post(
   "/company/qualifications/upload",
   upload.array("files", 10),
   async (req, res) => {
-    const files = req.files as Express.Multer.File[] | undefined;
+    const files = (req as MulterFilesRequest).files;
     if (!files || files.length === 0) {
       return res.status(400).json({ error: "请选择文件" });
     }

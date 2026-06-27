@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS tender_notice (
   title         TEXT NOT NULL,
   source_site   VARCHAR(100),
   content_text  TEXT,
+  source_html   TEXT,
   budget_amount NUMERIC(18,2),
   deadline_time TIMESTAMPTZ,
   publish_date  DATE,
@@ -35,6 +36,21 @@ CREATE TABLE IF NOT EXISTS tender_performance (
   id          SERIAL PRIMARY KEY,
   tender_id   INT REFERENCES tender_notice(id) ON DELETE CASCADE,
   requirement TEXT NOT NULL
+);
+
+-- Tender documents and linked files discovered from detail pages
+CREATE TABLE IF NOT EXISTS tender_document (
+  id              SERIAL PRIMARY KEY,
+  tender_id       INT REFERENCES tender_notice(id) ON DELETE CASCADE,
+  url             TEXT NOT NULL,
+  label           TEXT,
+  source_page_url TEXT,
+  content_type    TEXT,
+  status          VARCHAR(30) NOT NULL DEFAULT 'linked',
+  text_content    TEXT,
+  error           TEXT,
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(tender_id, url)
 );
 
 -- Analysis result for each tender
@@ -106,6 +122,12 @@ export async function initSchema(): Promise<void> {
     await client.query(
       `DO $$ BEGIN
          ALTER TABLE company_profile ADD COLUMN min_project_amount NUMERIC(18,2) DEFAULT 0;
+       EXCEPTION WHEN duplicate_column THEN NULL;
+       END $$;`
+    );
+    await client.query(
+      `DO $$ BEGIN
+         ALTER TABLE tender_notice ADD COLUMN source_html TEXT;
        EXCEPTION WHEN duplicate_column THEN NULL;
        END $$;`
     );

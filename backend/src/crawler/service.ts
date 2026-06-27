@@ -7,7 +7,10 @@ import { LianyungangCrawler } from "./sites/lianyungang.js";
 import { ZhenjiangCrawler, setKimiApiKey } from "./sites/zhenjiang.js";
 import { HuaianCrawler } from "./sites/huaian.js";
 import { initSchema } from "../db/schema.js";
-import { seedIfEmpty } from "../db/company-repo.js";
+import {
+  getCompanyProfileForAnalysis,
+  seedIfEmpty
+} from "../db/company-repo.js";
 import {
   upsertTender,
   getAllTenders as dbGetAllTenders,
@@ -28,6 +31,10 @@ export interface EnrichedTender {
   qualificationRequirements: { name: string; level: string }[];
   personnelRequirements?: string[];
   performanceRequirements?: string[];
+  sourceHtml?: string;
+  resolvedLinks?: TenderNotice["resolvedLinks"];
+  attachments?: TenderNotice["attachments"];
+  documentTexts?: string[];
   analysis: TenderAnalysisResult;
 }
 
@@ -128,6 +135,7 @@ class CrawlerService {
     this.jobs.unshift(job);
 
     try {
+      const companyProfile = await this.getCompanyProfile();
       for (let page = 1; page <= maxPages; page++) {
         const result = await crawler.fetchList(page);
         job.pagesTotal = Math.min(result.totalPages, maxPages);
@@ -138,7 +146,7 @@ class CrawlerService {
 
           try {
             const tender = await crawler.fetchDetail(item);
-            const analysis = analyzeTender(tender, seedCompanyProfile);
+            const analysis = analyzeTender(tender, companyProfile);
             const enriched: EnrichedTender = { ...tender, analysis };
 
             // Persist to PostgreSQL (upsert dedup by URL)
@@ -177,6 +185,19 @@ class CrawlerService {
 
     job.completedAt = new Date();
     return job;
+  }
+
+  private async getCompanyProfile() {
+    if (!this.dbReady) return seedCompanyProfile;
+
+    try {
+      return (await getCompanyProfileForAnalysis()) ?? seedCompanyProfile;
+    } catch (err) {
+      console.warn(
+        `Failed to load company profile from DB, using seed data: ${String(err)}`
+      );
+      return seedCompanyProfile;
+    }
   }
 
   get count(): number {
