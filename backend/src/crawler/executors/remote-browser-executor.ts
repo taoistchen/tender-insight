@@ -227,10 +227,14 @@ export class RemoteBrowserExecutor implements CrawlExecutor {
           selectorFailure(url, action.selector, error);
         }
       case "click":
-        await page.click(action.selector, {
-          timeout: action.timeoutMs ?? DEFAULT_SELECTOR_TIMEOUT_MS
-        });
-        return;
+        try {
+          await page.click(action.selector, {
+            timeout: action.timeoutMs ?? DEFAULT_SELECTOR_TIMEOUT_MS
+          });
+          return;
+        } catch (error) {
+          selectorFailure(url, action.selector, error);
+        }
       case "scrollToBottom":
         for (let index = 0; index < action.times; index += 1) {
           await page.evaluate(() => {

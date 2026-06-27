@@ -130,6 +130,76 @@ describe("remote browser executor", () => {
     });
   });
 
+  it("returns selector diagnostics when a click action times out", async () => {
+    const clickSource: CrawlSource = {
+      ...source,
+      actions: [
+        { type: "goto", urlFrom: "source.url" },
+        { type: "click", selector: ".next", timeoutMs: 1000 }
+      ]
+    };
+    const page = {
+      goto: vi.fn(async () => undefined),
+      waitForSelector: vi.fn(async () => undefined),
+      click: vi.fn(async () => {
+        throw new Error("Timeout 1000ms exceeded while waiting for selector .next");
+      }),
+      evaluate: vi.fn(async () => undefined),
+      content: vi.fn(async () => "<html></html>"),
+      title: vi.fn(async () => "List"),
+      url: vi.fn(() => "https://example.com/list")
+    };
+    const browser = { close: vi.fn(async () => undefined) };
+
+    const executor = new RemoteBrowserExecutor({
+      provider: makeProvider(),
+      connector: async () => ({ browser: browser as never, page: page as never })
+    });
+
+    await expect(executor.collectList(clickSource, 1)).rejects.toMatchObject({
+      attempt: {
+        strategy: "remote_browser",
+        status: "failed",
+        errorCode: "SELECTOR_NOT_FOUND"
+      }
+    });
+  });
+
+  it("returns remote browser diagnostics when a click action fails because the page closed", async () => {
+    const clickSource: CrawlSource = {
+      ...source,
+      actions: [
+        { type: "goto", urlFrom: "source.url" },
+        { type: "click", selector: ".next", timeoutMs: 1000 }
+      ]
+    };
+    const page = {
+      goto: vi.fn(async () => undefined),
+      waitForSelector: vi.fn(async () => undefined),
+      click: vi.fn(async () => {
+        throw new Error("Protocol error: Target page, context or browser has been closed");
+      }),
+      evaluate: vi.fn(async () => undefined),
+      content: vi.fn(async () => "<html></html>"),
+      title: vi.fn(async () => "List"),
+      url: vi.fn(() => "https://example.com/list")
+    };
+    const browser = { close: vi.fn(async () => undefined) };
+
+    const executor = new RemoteBrowserExecutor({
+      provider: makeProvider(),
+      connector: async () => ({ browser: browser as never, page: page as never })
+    });
+
+    await expect(executor.collectList(clickSource, 1)).rejects.toMatchObject({
+      attempt: {
+        strategy: "remote_browser",
+        status: "failed",
+        errorCode: "REMOTE_BROWSER_UNAVAILABLE"
+      }
+    });
+  });
+
   it("closes a partially connected browser when page setup fails", async () => {
     const setupError = new Error("new context failed");
     const browser = {
@@ -164,10 +234,12 @@ describe("browserbase provider", () => {
     expect(fetch).toHaveBeenCalledWith(
       "https://api.browserbase.com/v1/sessions/session%2F1",
       {
-        method: "DELETE",
+        method: "POST",
         headers: {
+          "Content-Type": "application/json",
           "X-BB-API-Key": "key-1"
-        }
+        },
+        body: JSON.stringify({ status: "REQUEST_RELEASE" })
       }
     );
   });

@@ -56,10 +56,12 @@ export class BrowserbaseProvider implements RemoteBrowserProvider {
 
     try {
       await fetch(`${BROWSERBASE_SESSIONS_URL}/${encodeURIComponent(sessionId)}`, {
-        method: "DELETE",
+        method: "POST",
         headers: {
+          "Content-Type": "application/json",
           "X-BB-API-Key": apiKey
-        }
+        },
+        body: JSON.stringify({ status: "REQUEST_RELEASE" })
       });
     } catch {
       return;
