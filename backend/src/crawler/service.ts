@@ -4,7 +4,7 @@ import type { TenderNotice } from "../domain/types.js";
 import type { TenderAnalysisResult } from "../domain/types.js";
 import { NanjingCrawler } from "./sites/nanjing.js";
 import { LianyungangCrawler } from "./sites/lianyungang.js";
-import { ZhenjiangCrawler } from "./sites/zhenjiang.js";
+import { ZhenjiangCrawler, setKimiApiKey } from "./sites/zhenjiang.js";
 import { HuaianCrawler } from "./sites/huaian.js";
 import type { CrawlJob, TenderCrawler, TenderListItem } from "./types.js";
 
@@ -34,6 +34,10 @@ class CrawlerService {
   private crawlers: TenderCrawler[] = [];
 
   constructor() {
+    // Inject Kimi API key for captcha solving
+    const kimiKey = process.env["KIMI_API_KEY"] ?? "";
+    if (kimiKey) setKimiApiKey(kimiKey);
+
     this.crawlers.push(new NanjingCrawler());
     this.crawlers.push(new LianyungangCrawler());
     this.crawlers.push(new ZhenjiangCrawler());
