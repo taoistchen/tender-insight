@@ -234,6 +234,10 @@ class CrawlerService {
       requestedMaxPages: maxPages
     });
 
+    const pagesToCrawl = hasExplicitPaginationSupport(source)
+      ? resolvedMaxPages
+      : Math.min(resolvedMaxPages, 1);
+
     const job: CrawlJob = {
       id: `crawl-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       siteName: recipe.siteName,
@@ -241,7 +245,7 @@ class CrawlerService {
       sourceKey: source.key,
       status: "running",
       startedAt: new Date(),
-      pagesTotal: resolvedMaxPages,
+      pagesTotal: pagesToCrawl,
       pagesCrawled: 0,
       tendersFound: 0,
       tendersNew: 0,
@@ -252,7 +256,7 @@ class CrawlerService {
     try {
       const companyProfile = await this.getCompanyProfile();
 
-      for (let page = 1; page <= resolvedMaxPages; page++) {
+      for (let page = 1; page <= pagesToCrawl; page++) {
         const collectedList = await this.collectWithFallback(source, page, job);
         job.pagesCrawled = page;
 
@@ -291,12 +295,8 @@ class CrawlerService {
 
       job.status = "completed";
     } catch (err) {
-      if (job.tendersFound > 0) {
-        job.status = "completed";
-      } else {
-        job.status = "failed";
-        job.error = String(err);
-      }
+      job.status = "failed";
+      job.error = err instanceof Error ? err.message : String(err);
     } finally {
       job.completedAt = new Date();
     }
@@ -493,4 +493,8 @@ function extractTitle(html: string): string | undefined {
 
 function stripTags(input: string): string {
   return input.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function hasExplicitPaginationSupport(source: CrawlSource): boolean {
+  return Object.prototype.hasOwnProperty.call(source, "pagination");
 }

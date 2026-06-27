@@ -25,11 +25,13 @@ const source: CrawlSource = {
   }
 };
 
-describe("direct fetch executor", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
+afterEach(() => {
+  vi.doUnmock("../recipes.js");
+  vi.resetModules();
+  vi.unstubAllGlobals();
+});
 
+describe("direct fetch executor", () => {
   it("collects source HTML and records a successful attempt", async () => {
     vi.stubGlobal(
       "fetch",
@@ -142,5 +144,165 @@ describe("recipe crawl fallback", () => {
       job.strategyAttempts?.map((attempt) => attempt.status).slice(0, 2)
     ).toEqual(["failed", "succeeded"]);
     expect(job.tendersFound).toBeGreaterThan(0);
+  });
+
+  it("marks a paginated recipe crawl as failed when a later list page cannot be collected", async () => {
+    vi.resetModules();
+    vi.doMock("../recipes.js", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("../recipes.js")>();
+      return {
+        ...actual,
+        resolveRecipeSource: () => ({
+          recipe: {
+            siteKey: "huaian",
+            siteName: "Huai'an Public Resources Trading Center",
+            city: "Huaian",
+            enabled: true,
+            sources: []
+          },
+          source: {
+            ...source,
+            maxPages: 2,
+            pagination: { type: "page" }
+          },
+          maxPages: 2
+        })
+      };
+    });
+
+    const { CrawlerService: MockedCrawlerService } = await import("../service.js");
+
+    const direct: CrawlExecutor = {
+      strategy: "backend_fetch",
+      collectList: async (_source, page) => {
+        if (page === 1) {
+          return collected(
+            "backend_fetch",
+            '<html><body><a href="https://example.com/detail">First Tender</a></body></html>'
+          );
+        }
+
+        throw new CrawlExecutionError({
+          strategy: "backend_fetch",
+          status: "failed",
+          url: "https://example.com/list",
+          errorCode: "NETWORK_RESTRICTED",
+          message: "direct blocked"
+        });
+      },
+      collectDetail: async () =>
+        collected("backend_fetch", "<html><body>First Tender</body></html>")
+    };
+    const remote: CrawlExecutor = {
+      strategy: "remote_browser",
+      collectList: async () => {
+        throw new CrawlExecutionError({
+          strategy: "remote_browser",
+          status: "failed",
+          url: "https://example.com/list",
+          errorCode: "REMOTE_BROWSER_UNAVAILABLE",
+          message: "remote unavailable"
+        });
+      },
+      collectDetail: async () =>
+        collected("remote_browser", "<html><body>First Tender</body></html>")
+    };
+
+    const service = new MockedCrawlerService(undefined, {
+      executors: [direct, remote]
+    });
+
+    const job = await service.runRecipeCrawl({
+      siteKey: "huaian",
+      sourceKey: "construction",
+      maxPages: 2
+    });
+
+    expect(job.status).toBe("failed");
+    expect(job.pagesCrawled).toBe(1);
+    expect(job.tendersFound).toBe(1);
+    expect(job.error).toContain("remote unavailable");
+    expect(job.completedAt).toBeInstanceOf(Date);
+  });
+
+  it("limits current recipes to one list page until pagination is explicit", async () => {
+    let listCollections = 0;
+    const direct: CrawlExecutor = {
+      strategy: "backend_fetch",
+      collectList: async () => {
+        listCollections++;
+        return collected(
+          "backend_fetch",
+          '<html><body><a href="https://example.com/detail">Single Tender</a></body></html>'
+        );
+      },
+      collectDetail: async () =>
+        collected("backend_fetch", "<html><body>Single Tender</body></html>")
+    };
+
+    const service = new CrawlerService(undefined, {
+      executors: [direct]
+    });
+
+    const job = await service.runRecipeCrawl({
+      siteKey: "huaian",
+      sourceKey: "construction",
+      maxPages: 2
+    });
+
+    expect(job.status).toBe("completed");
+    expect(job.pagesTotal).toBe(1);
+    expect(job.pagesCrawled).toBe(1);
+    expect(listCollections).toBe(1);
+  });
+});
+
+describe("crawler run request validation", () => {
+  it("rejects partial recipe identifiers", async () => {
+    const routeModule = await import("../../routes/crawler.js");
+    expect("validateCrawlerRunRequest" in routeModule).toBe(true);
+    const validateCrawlerRunRequest = routeModule.validateCrawlerRunRequest as (
+      body: unknown
+    ) => { ok: boolean; error?: string };
+
+    expect(validateCrawlerRunRequest({ siteKey: "huaian" })).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("siteKey and sourceKey")
+    });
+    expect(validateCrawlerRunRequest({ sourceKey: "construction" })).toMatchObject(
+      {
+        ok: false,
+        error: expect.stringContaining("siteKey and sourceKey")
+      }
+    );
+  });
+
+  it("normalizes maxPages to a finite positive capped number", async () => {
+    const routeModule = await import("../../routes/crawler.js");
+    expect("validateCrawlerRunRequest" in routeModule).toBe(true);
+    const validateCrawlerRunRequest = routeModule.validateCrawlerRunRequest as (
+      body: unknown
+    ) => { ok: true; maxPages: number };
+
+    expect(validateCrawlerRunRequest({ maxPages: Number.NaN })).toMatchObject({
+      ok: true,
+      maxPages: 3
+    });
+    expect(validateCrawlerRunRequest({ maxPages: Infinity })).toMatchObject({
+      ok: true,
+      maxPages: 3
+    });
+    expect(validateCrawlerRunRequest({ maxPages: 0 })).toMatchObject({
+      ok: true,
+      maxPages: 3
+    });
+    expect(validateCrawlerRunRequest({ maxPages: "5" })).toMatchObject({
+      ok: true,
+      maxPages: 3
+    });
+    expect(validateCrawlerRunRequest({ maxPages: 50 })).toMatchObject({
+      ok: true,
+      maxPages: 10
+    });
   });
 });
