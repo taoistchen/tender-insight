@@ -75,6 +75,58 @@ function ErrorState({ message, onRetry }: { message: string; onRetry: () => void
   return <div className="error-state"><p className="error-icon">⚠</p><p className="error-message">{message}</p><button className="btn btn-primary" onClick={onRetry}>重试</button></div>;
 }
 
+/* ─── DatePicker ─── */
+
+function DatePicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  const d = value ? new Date(value) : new Date();
+  const year = d.getFullYear(); const month = d.getMonth();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const firstDay = new Date(year, month, 0).getDay();
+  const months = ["一月","二月","三月","四月","五月","六月","七月","八月","九月","十月","十一月","十二月"];
+  const weekDays = ["日","一","二","三","四","五","六"];
+
+  function select(day: number) {
+    const m = String(month + 1).padStart(2, "0");
+    const dd = String(day).padStart(2, "0");
+    onChange(`${year}-${m}-${dd}`); setOpen(false);
+  }
+
+  return (
+    <div className="datepicker" ref={ref}>
+      <div className="datepicker-input" onClick={() => setOpen(!open)}>
+        <span className={value ? "" : "datepicker-placeholder"}>{value || "选择日期"}</span>
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="11" rx="1.5" stroke="#8c8c8c" strokeWidth="1.2"/><path d="M5 1v4M11 1v4M2 7h12" stroke="#8c8c8c" strokeWidth="1.2" strokeLinecap="round"/></svg>
+      </div>
+      {open && (
+        <div className="datepicker-dropdown">
+          <div className="datepicker-nav">
+            <button type="button" onClick={() => onChange(`${year}-${String(month).padStart(2,"0")}-01`)} disabled={month === 0}>&lt;</button>
+            <span>{year}年 {months[month]}</span>
+            <button type="button" onClick={() => onChange(`${year}-${String(month+2).padStart(2,"0")}-01`)} disabled={month === 11}>&gt;</button>
+          </div>
+          <div className="datepicker-weekdays">{weekDays.map(w => <span key={w}>{w}</span>)}</div>
+          <div className="datepicker-grid">
+            {Array.from({ length: firstDay }, (_, i) => <span key={`e${i}`} />)}
+            {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(day => {
+              const isToday = value === `${year}-${String(month+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+              return <button key={day} type="button" className={`datepicker-day ${isToday ? "datepicker-day--sel" : ""}`} onClick={() => select(day)}>{day}</button>;
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ─── Modal ─── */
 
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
@@ -135,8 +187,12 @@ function AdminForm({ onSubmit, initial, onCancel, fields }: {
       {fields.map(f => (
         <label key={f.key}>
           <span>{f.label}</span>
-          <input type={f.type ?? "text"} value={form[f.key] ?? ""}
-            onChange={e => setForm({ ...form, [f.key]: e.target.value })} />
+          {f.type === "date" ? (
+            <DatePicker value={form[f.key] ?? ""} onChange={v => setForm({ ...form, [f.key]: v })} />
+          ) : (
+            <input type={f.type ?? "text"} value={form[f.key] ?? ""}
+              onChange={e => setForm({ ...form, [f.key]: e.target.value })} />
+          )}
         </label>
       ))}
       <div className="admin-form-btns">
