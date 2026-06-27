@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { BrowserbaseProvider } from "../executors/remote-browser-provider.js";
 import {
   createRemoteBrowserConnection,
   RemoteBrowserExecutor
@@ -34,6 +35,11 @@ function makeProvider(): RemoteBrowserProvider {
   };
 }
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+});
+
 describe("remote browser executor", () => {
   it("runs recipe actions and returns extracted HTML", async () => {
     const page = {
@@ -68,11 +74,11 @@ describe("remote browser executor", () => {
     expect(result.attempt.status).toBe("succeeded");
   });
 
-  it("returns selector diagnostics when a wait action fails", async () => {
+  it("returns selector diagnostics when a wait action times out", async () => {
     const page = {
       goto: vi.fn(async () => undefined),
       waitForSelector: vi.fn(async () => {
-        throw new Error("missing selector");
+        throw new Error("Timeout 1000ms exceeded while waiting for selector .list");
       }),
       click: vi.fn(async () => undefined),
       evaluate: vi.fn(async () => undefined),
@@ -96,6 +102,34 @@ describe("remote browser executor", () => {
     });
   });
 
+  it("returns remote browser diagnostics when a wait action fails because the page closed", async () => {
+    const page = {
+      goto: vi.fn(async () => undefined),
+      waitForSelector: vi.fn(async () => {
+        throw new Error("Protocol error: Target page, context or browser has been closed");
+      }),
+      click: vi.fn(async () => undefined),
+      evaluate: vi.fn(async () => undefined),
+      content: vi.fn(async () => "<html></html>"),
+      title: vi.fn(async () => "List"),
+      url: vi.fn(() => "https://example.com/list")
+    };
+    const browser = { close: vi.fn(async () => undefined) };
+
+    const executor = new RemoteBrowserExecutor({
+      provider: makeProvider(),
+      connector: async () => ({ browser: browser as never, page: page as never })
+    });
+
+    await expect(executor.collectList(source, 1)).rejects.toMatchObject({
+      attempt: {
+        strategy: "remote_browser",
+        status: "failed",
+        errorCode: "REMOTE_BROWSER_UNAVAILABLE"
+      }
+    });
+  });
+
   it("closes a partially connected browser when page setup fails", async () => {
     const setupError = new Error("new context failed");
     const browser = {
@@ -114,5 +148,47 @@ describe("remote browser executor", () => {
     ).rejects.toBe(setupError);
 
     expect(browser.close).toHaveBeenCalledOnce();
+  });
+});
+
+describe("browserbase provider", () => {
+  it("sends a best-effort session release request", async () => {
+    vi.stubEnv("BROWSERBASE_API_KEY", "key-1");
+    const fetch = vi.fn(async () => ({ ok: true }));
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(
+      new BrowserbaseProvider().closeSession("session/1")
+    ).resolves.toBeUndefined();
+
+    expect(fetch).toHaveBeenCalledWith(
+      "https://api.browserbase.com/v1/sessions/session%2F1",
+      {
+        method: "DELETE",
+        headers: {
+          "X-BB-API-Key": "key-1"
+        }
+      }
+    );
+  });
+
+  it("does not throw when session release cannot run or fails", async () => {
+    const provider = new BrowserbaseProvider();
+
+    await expect(provider.closeSession("missing-key")).resolves.toBeUndefined();
+
+    vi.stubEnv("BROWSERBASE_API_KEY", "key-1");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("network failed");
+      })
+    );
+
+    await expect(provider.closeSession("fetch-fails")).resolves.toBeUndefined();
+
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 500 })));
+
+    await expect(provider.closeSession("delete-fails")).resolves.toBeUndefined();
   });
 });

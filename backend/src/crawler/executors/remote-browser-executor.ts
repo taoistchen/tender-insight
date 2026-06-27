@@ -43,7 +43,49 @@ function inferRemoteErrorCode(error: unknown): CrawlErrorCode {
   return "REMOTE_BROWSER_UNAVAILABLE";
 }
 
+function isRemoteBrowserClosedError(error: unknown): boolean {
+  const normalizedMessage = errorMessage(error).toLowerCase();
+
+  return (
+    normalizedMessage.includes("target page, context or browser has been closed") ||
+    normalizedMessage.includes("browser has been closed") ||
+    normalizedMessage.includes("page has been closed") ||
+    normalizedMessage.includes("page closed") ||
+    normalizedMessage.includes("protocol error")
+  );
+}
+
+function isSelectorMissingError(error: unknown): boolean {
+  if (isRemoteBrowserClosedError(error)) {
+    return false;
+  }
+
+  const normalizedMessage = errorMessage(error).toLowerCase();
+  const name = error instanceof Error ? error.name.toLowerCase() : "";
+  const referencesSelector =
+    normalizedMessage.includes("selector") ||
+    normalizedMessage.includes("waitforselector") ||
+    normalizedMessage.includes("waiting for");
+  const isMissingOrTimedOut =
+    normalizedMessage.includes("not found") ||
+    normalizedMessage.includes("timeout") ||
+    normalizedMessage.includes("timed out") ||
+    name.includes("timeout");
+
+  return referencesSelector && isMissingOrTimedOut;
+}
+
 function selectorFailure(url: string, selector: string, error: unknown): never {
+  if (!isSelectorMissingError(error)) {
+    throw new CrawlExecutionError({
+      strategy: "remote_browser",
+      status: "failed",
+      url,
+      errorCode: inferRemoteErrorCode(error),
+      message: errorMessage(error)
+    });
+  }
+
   throw new CrawlExecutionError({
     strategy: "remote_browser",
     status: "failed",

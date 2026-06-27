@@ -48,6 +48,21 @@ export class BrowserbaseProvider implements RemoteBrowserProvider {
   }
 
   async closeSession(sessionId: string): Promise<void> {
-    void sessionId;
+    const apiKey = process.env.BROWSERBASE_API_KEY;
+
+    if (!apiKey) {
+      return;
+    }
+
+    try {
+      await fetch(`${BROWSERBASE_SESSIONS_URL}/${encodeURIComponent(sessionId)}`, {
+        method: "DELETE",
+        headers: {
+          "X-BB-API-Key": apiKey
+        }
+      });
+    } catch {
+      return;
+    }
   }
 }
