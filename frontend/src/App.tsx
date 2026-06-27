@@ -413,11 +413,21 @@ export function App() {
   useEffect(() => { if (mode === "admin") fetchAdmin(); }, [mode]);
   useEffect(() => { if (mode === "crawler") fetchCrawlerData(); }, [mode]);
   useEffect(() => {
+    if (!recipes.length) return;
     const selectedSite = recipes.find(recipe => recipe.siteKey === selectedSiteKey);
-    if (selectedSite?.sources.length && !selectedSite.sources.some(source => source.key === selectedSourceKey)) {
+    if (!selectedSite) {
+      const firstRecipe = recipes[0];
+      setSelectedSiteKey(firstRecipe.siteKey);
+      setSelectedSourceKey(firstRecipe.sources[0]?.key ?? "");
+      return;
+    }
+    if (selectedSite.sources.length && !selectedSite.sources.some(source => source.key === selectedSourceKey)) {
       setSelectedSourceKey(selectedSite.sources[0].key);
+    } else if (!selectedSite.sources.length && selectedSourceKey) {
+      setSelectedSourceKey("");
     }
   }, [recipes, selectedSiteKey, selectedSourceKey]);
+  useEffect(() => { setCrawlError(null); }, [selectedSiteKey, selectedSourceKey, crawlPages]);
   useEffect(() => {
     const selectedSite = recipes.find(recipe => recipe.siteKey === selectedSiteKey);
     const selectedSourceForPages = selectedSite?.sources.find(source => source.key === selectedSourceKey);
@@ -570,7 +580,7 @@ export function App() {
               <p className="panel-eyebrow">Silent remote browser collection</p>
               <h2>采集中心</h2>
             </div>
-            <button className="btn" onClick={fetchCrawlerData} disabled={crawlLoading}>刷新任务</button>
+            <button className="btn" onClick={() => { setCrawlError(null); fetchCrawlerData(); }} disabled={crawlLoading}>刷新任务</button>
           </div>
 
           <div className="crawler-controls">

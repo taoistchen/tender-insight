@@ -932,6 +932,22 @@ th.sortable:hover {
   color: var(--color-reject-text);
 }
 
+@media (max-width: 960px) {
+  .crawler-controls {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 540px) {
+  .crawler-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .crawler-job-main {
+    flex-direction: column;
+  }
+}
+
 /* ─── Admin Panel ─── */
 
 .admin-panel {
