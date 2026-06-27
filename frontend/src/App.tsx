@@ -26,6 +26,40 @@ interface Qualification { id: number; name: string; level: string; validTo: stri
 interface Personnel { id: number; personName: string; certificateType: string | null; major: string | null; level: string | null; validTo: string | null; }
 interface Performance { id: number; projectName: string; projectType: string | null; amount: number | null; completionDate: string | null; }
 
+interface CrawlRecipe {
+  siteKey: string;
+  siteName: string;
+  city: string;
+  sources: {
+    key: string;
+    name: string;
+    maxPages: number;
+    strategies: string[];
+  }[];
+}
+
+interface CrawlJob {
+  id: string;
+  siteName: string;
+  siteKey?: string;
+  sourceKey?: string;
+  status: "running" | "completed" | "failed" | "skipped";
+  startedAt: string;
+  completedAt?: string;
+  pagesTotal: number;
+  pagesCrawled: number;
+  tendersFound: number;
+  tendersNew: number;
+  error?: string;
+  strategyAttempts?: {
+    strategy: string;
+    status: string;
+    url: string;
+    errorCode?: string;
+    message?: string;
+  }[];
+}
+
 /* ─── Constants ─── */
 
 const DECISION_LABELS: Record<Decision, string> = {
@@ -41,6 +75,7 @@ const API = "/api"; const PAGE_SIZE = 10;
 type LoadingState = "idle" | "loading" | "error" | "ready";
 type SortKey = "decision" | "score" | "deadline" | "amount";
 type AdminTab = "qualifications" | "personnel" | "performances" | "preferences";
+type Mode = "dashboard" | "crawler" | "admin";
 
 /* ─── Helpers ─── */
 
@@ -239,7 +274,7 @@ function AdminList<T extends { id: number }>({ items, render, onDelete, onEdit, 
 /* ─── Main App ─── */
 
 export function App() {
-  const [mode, setMode] = useState<"dashboard" | "admin">("dashboard");
+  const [mode, setMode] = useState<Mode>("dashboard");
   const [adminTab, setAdminTab] = useState<AdminTab>("qualifications");
 
   // Dashboard state
@@ -258,6 +293,14 @@ export function App() {
   const [adminLoading, setAdminLoading] = useState(false);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<EditTarget | null>(null);
+
+  // Crawler state
+  const [recipes, setRecipes] = useState<CrawlRecipe[]>([]);
+  const [jobs, setJobs] = useState<CrawlJob[]>([]);
+  const [selectedSiteKey, setSelectedSiteKey] = useState("huaian");
+  const [selectedSourceKey, setSelectedSourceKey] = useState("construction");
+  const [crawlPages, setCrawlPages] = useState(1);
+  const [crawlLoading, setCrawlLoading] = useState(false);
 
   // Upload & AI extraction
   const [uploading, setUploading] = useState(false);
@@ -314,8 +357,56 @@ export function App() {
     setAdminLoading(false);
   }
 
+  async function fetchCrawlerData() {
+    try {
+      const [recipeResponse, jobResponse] = await Promise.all([
+        fetch(`${API}/crawler/recipes`),
+        fetch(`${API}/crawler/jobs`)
+      ]);
+      if (recipeResponse.ok) setRecipes(await recipeResponse.json());
+      if (jobResponse.ok) setJobs(await jobResponse.json());
+    } catch (err) {
+      console.error("Crawler data fetch failed:", err);
+    }
+  }
+
+  async function startRecipeCrawl() {
+    if (!selectedSource) return;
+    setCrawlLoading(true);
+    try {
+      await fetch(`${API}/crawler/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          siteKey: selectedSiteKey,
+          sourceKey: selectedSourceKey,
+          maxPages: Math.min(crawlPages, selectedSource.maxPages)
+        })
+      });
+      await Promise.all([fetchCrawlerData(), fetchTenders()]);
+    } catch (err) {
+      console.error("Crawler start failed:", err);
+    } finally {
+      setCrawlLoading(false);
+    }
+  }
+
   useEffect(() => { fetchTenders(); fetchCompany(); }, []);
   useEffect(() => { if (mode === "admin") fetchAdmin(); }, [mode]);
+  useEffect(() => { if (mode === "crawler") fetchCrawlerData(); }, [mode]);
+  useEffect(() => {
+    const selectedSite = recipes.find(recipe => recipe.siteKey === selectedSiteKey);
+    if (selectedSite?.sources.length && !selectedSite.sources.some(source => source.key === selectedSourceKey)) {
+      setSelectedSourceKey(selectedSite.sources[0].key);
+    }
+  }, [recipes, selectedSiteKey, selectedSourceKey]);
+  useEffect(() => {
+    const selectedSite = recipes.find(recipe => recipe.siteKey === selectedSiteKey);
+    const selectedSourceForPages = selectedSite?.sources.find(source => source.key === selectedSourceKey);
+    if (selectedSourceForPages && crawlPages > selectedSourceForPages.maxPages) {
+      setCrawlPages(selectedSourceForPages.maxPages);
+    }
+  }, [crawlPages, recipes, selectedSiteKey, selectedSourceKey]);
 
   /* ─── Admin actions ─── */
 
@@ -344,6 +435,8 @@ export function App() {
   const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
   const paged = sorted.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const selectedRecipe = recipes.find(recipe => recipe.siteKey === selectedSiteKey);
+  const selectedSource = selectedRecipe?.sources.find(source => source.key === selectedSourceKey);
 
   const metrics = useMemo(() => {
     const now = Date.now(); const soon = now + 3 * 86400000;
@@ -368,6 +461,7 @@ export function App() {
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
           <button className={`btn ${mode === "dashboard" ? "btn-primary" : ""}`} onClick={() => setMode("dashboard")}>仪表盘</button>
+          <button className={`btn ${mode === "crawler" ? "btn-primary" : ""}`} onClick={() => setMode("crawler")}>采集中心</button>
           <button className={`btn ${mode === "admin" ? "btn-primary" : ""}`} onClick={() => setMode("admin")}>管理后台</button>
           <span className="mvp-badge" title="MVP">MVP</span>
         </div>
@@ -451,6 +545,105 @@ export function App() {
             </aside>
           </section>
         </>
+      ) : mode === "crawler" ? (
+        <section className="panel crawler-panel">
+          <div className="panel-header">
+            <div>
+              <p className="panel-eyebrow">Silent remote browser collection</p>
+              <h2>采集中心</h2>
+            </div>
+            <button className="btn" onClick={fetchCrawlerData} disabled={crawlLoading}>刷新任务</button>
+          </div>
+
+          <div className="crawler-controls">
+            <label>
+              <span>站点</span>
+              <select value={selectedSiteKey} onChange={e => setSelectedSiteKey(e.target.value)}>
+                {recipes.map(recipe => (
+                  <option key={recipe.siteKey} value={recipe.siteKey}>{recipe.siteName} · {recipe.city}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>来源</span>
+              <select value={selectedSourceKey} onChange={e => setSelectedSourceKey(e.target.value)} disabled={!selectedRecipe}>
+                {(selectedRecipe?.sources ?? []).map(source => (
+                  <option key={source.key} value={source.key}>{source.name}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>页数</span>
+              <input
+                type="number"
+                min={1}
+                max={selectedSource?.maxPages ?? 10}
+                value={crawlPages}
+                onChange={e => setCrawlPages(Math.max(1, Number(e.target.value) || 1))}
+              />
+            </label>
+            <button className="btn btn-primary" onClick={startRecipeCrawl} disabled={crawlLoading || !selectedSource}>
+              {crawlLoading ? "启动中..." : "开始采集"}
+            </button>
+          </div>
+
+          {selectedSource && (
+            <div className="crawler-source-meta">
+              <span>Max {selectedSource.maxPages} pages</span>
+              <span>{selectedSource.strategies.join(" / ")}</span>
+            </div>
+          )}
+
+          <div className="crawler-jobs">
+            {jobs.length === 0 ? (
+              <div className="empty-state-full">
+                <p>暂无采集任务</p>
+                <p className="empty-hint">启动采集后可在这里查看静默浏览器任务进度。</p>
+              </div>
+            ) : jobs.map(job => (
+              <article key={job.id} className={`crawler-job crawler-job--${job.status}`}>
+                <div className="crawler-job-main">
+                  <div>
+                    <div className="crawler-job-title">
+                      <strong>{job.siteName}</strong>
+                      <span>{job.sourceKey ?? "source"}</span>
+                    </div>
+                    <div className="crawler-job-meta">
+                      <span>Started {formatDeadline(job.startedAt)}</span>
+                      {job.completedAt && <span>Completed {formatDeadline(job.completedAt)}</span>}
+                    </div>
+                  </div>
+                  <span className={`crawler-status crawler-status--${job.status}`}>{job.status}</span>
+                </div>
+                <div className="crawler-job-stats">
+                  <span>{job.pagesCrawled}/{job.pagesTotal} pages</span>
+                  <span>{job.tendersFound} found</span>
+                  <span>{job.tendersNew} new</span>
+                </div>
+                {job.error && <div className="crawler-error">{job.error}</div>}
+                {job.strategyAttempts?.length ? (
+                  <div className="crawler-attempts">
+                    {job.strategyAttempts.slice(-4).map((attempt, index) => {
+                      const isSucceeded = ["success", "succeeded", "completed"].includes(attempt.status);
+                      const isFailed = ["failed", "error"].includes(attempt.status);
+                      return (
+                        <div
+                          key={`${attempt.strategy}-${attempt.url}-${index}`}
+                          className={`crawler-attempt ${isSucceeded ? "crawler-attempt--succeeded" : ""} ${isFailed ? "crawler-attempt--failed" : ""}`}
+                        >
+                          <span>{attempt.strategy}</span>
+                          <span>{attempt.status}</span>
+                          {attempt.errorCode && <span>{attempt.errorCode}</span>}
+                          {attempt.message && <span>{attempt.message}</span>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </article>
+            ))}
+          </div>
+        </section>
       ) : (
         /* ─── Admin Panel ─── */
         <section className="admin-panel">

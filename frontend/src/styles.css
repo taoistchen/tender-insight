@@ -619,6 +619,10 @@ tbody tr:last-child td {
     grid-template-columns: 1fr;
   }
 
+  .crawler-controls {
+    grid-template-columns: 1fr 1fr;
+  }
+
   .metric-value {
     font-size: 28px;
   }
@@ -645,6 +649,14 @@ tbody tr:last-child td {
   .panel-header {
     flex-direction: column;
     gap: 8px;
+  }
+
+  .crawler-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .crawler-job-main {
+    flex-direction: column;
   }
 }
 
@@ -685,6 +697,218 @@ th.sortable:hover {
 .pagination-btns .btn:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+/* ─── Crawler Panel ─── */
+
+.crawler-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.crawler-controls {
+  align-items: end;
+  background: #f8f6f2;
+  border: 1px solid #e8e3da;
+  border-radius: var(--radius-md);
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(180px, 1.3fr) minmax(180px, 1.3fr) 110px auto;
+  padding: 16px;
+}
+
+.crawler-controls label {
+  display: grid;
+  gap: 6px;
+}
+
+.crawler-controls label span {
+  color: var(--color-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.crawler-controls select,
+.crawler-controls input {
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-slate);
+  font: inherit;
+  min-height: 34px;
+  padding: 7px 10px;
+}
+
+.crawler-controls select:focus,
+.crawler-controls input:focus {
+  border-color: var(--color-cyan);
+  outline: 2px solid rgba(13, 124, 143, 0.12);
+}
+
+.crawler-source-meta {
+  color: var(--color-muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 8px;
+}
+
+.crawler-source-meta span {
+  background: #f7f5f0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 3px 8px;
+}
+
+.crawler-jobs {
+  display: grid;
+  gap: 12px;
+}
+
+.crawler-job {
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-muted);
+  border-radius: var(--radius-md);
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+}
+
+.crawler-job--running {
+  border-left-color: var(--color-cyan);
+}
+
+.crawler-job--completed {
+  border-left-color: var(--color-rec-text);
+}
+
+.crawler-job--failed {
+  border-left-color: var(--color-reject-text);
+}
+
+.crawler-job--skipped {
+  border-left-color: var(--color-amber);
+}
+
+.crawler-job-main {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.crawler-job-title {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.crawler-job-title strong {
+  color: var(--color-blueprint);
+  font-size: 15px;
+}
+
+.crawler-job-title span,
+.crawler-job-meta {
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.crawler-job-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.crawler-status {
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 3px 10px;
+  text-transform: uppercase;
+}
+
+.crawler-status--running {
+  background: var(--color-watch-bg);
+  color: var(--color-watch-text);
+}
+
+.crawler-status--completed {
+  background: var(--color-rec-bg);
+  color: var(--color-rec-text);
+}
+
+.crawler-status--failed {
+  background: var(--color-reject-bg);
+  color: var(--color-reject-text);
+}
+
+.crawler-status--skipped {
+  background: var(--color-manual-bg);
+  color: var(--color-manual-text);
+}
+
+.crawler-job-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.crawler-job-stats span {
+  background: #f8f6f2;
+  border-radius: var(--radius-sm);
+  color: var(--color-slate);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  padding: 4px 8px;
+}
+
+.crawler-error {
+  background: var(--color-reject-bg);
+  border-radius: var(--radius-sm);
+  color: var(--color-reject-text);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 10px;
+}
+
+.crawler-attempts {
+  display: grid;
+  gap: 6px;
+}
+
+.crawler-attempt {
+  align-items: center;
+  background: #f7f5f0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 8px;
+  padding: 7px 9px;
+}
+
+.crawler-attempt span:first-child {
+  color: var(--color-slate);
+  font-weight: 700;
+}
+
+.crawler-attempt--succeeded {
+  background: var(--color-rec-bg);
+  border-color: #b9ded4;
+  color: var(--color-rec-text);
+}
+
+.crawler-attempt--failed {
+  background: var(--color-reject-bg);
+  border-color: #f4bcbc;
+  color: var(--color-reject-text);
 }
 
 /* ─── Admin Panel ─── */
