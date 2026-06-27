@@ -234,9 +234,7 @@ class CrawlerService {
       requestedMaxPages: maxPages
     });
 
-    const pagesToCrawl = hasExplicitPaginationSupport(source)
-      ? resolvedMaxPages
-      : Math.min(resolvedMaxPages, 1);
+    const pagesToCrawl = Math.min(resolvedMaxPages, 1);
 
     const job: CrawlJob = {
       id: `crawl-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -457,21 +455,29 @@ function extractRecipeListItems(
   source: CrawlSource
 ): TenderListItem[] {
   const items: TenderListItem[] = [];
-  const anchorRegex =
-    /<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
-  let match: RegExpExecArray | null;
+  const itemHtmlList = findElementsBySimpleSelector(
+    html,
+    source.selectors.items
+  );
 
-  while ((match = anchorRegex.exec(html)) !== null) {
-    const title = stripTags(match[2]).replace(/\s+/g, " ").trim();
-    if (!title) {
+  for (const itemHtml of itemHtmlList) {
+    const title = extractSelectorText(itemHtml, source.selectors.title);
+    const href = extractSelectorAttribute(itemHtml, source.selectors.detailUrl);
+
+    if (!title || !href) {
+      continue;
+    }
+
+    const normalizedTitle = title.replace(/\s+/g, " ").trim();
+    if (!normalizedTitle) {
       continue;
     }
 
     try {
-      const detailUrl = new URL(match[1], source.url).toString();
+      const detailUrl = new URL(href, source.url).toString();
       items.push({
         sectionNo: detailUrl,
-        projectName: title,
+        projectName: normalizedTitle,
         sectionName: "",
         publishDate: "",
         detailUrl,
@@ -495,6 +501,95 @@ function stripTags(input: string): string {
   return input.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 }
 
-function hasExplicitPaginationSupport(source: CrawlSource): boolean {
-  return Object.prototype.hasOwnProperty.call(source, "pagination");
+interface SimpleSelectorParts {
+  tagName?: string;
+  className?: string;
+}
+
+function parseSimpleSelector(selector: string): SimpleSelectorParts | undefined {
+  const match = selector.trim().match(/^([a-z][\w-]*)?(?:\.([\w-]+))?$/i);
+  if (!match || (!match[1] && !match[2])) {
+    return undefined;
+  }
+
+  return {
+    tagName: match[1]?.toLowerCase(),
+    className: match[2]
+  };
+}
+
+function findElementsBySimpleSelector(html: string, selector: string): string[] {
+  const parts = parseSimpleSelector(selector);
+  if (!parts) {
+    return [];
+  }
+
+  const tagPattern = parts.tagName ?? "[a-z][\\w-]*";
+  const openingTagRegex = new RegExp(`<(${tagPattern})\\b[^>]*>`, "gi");
+  const elements: string[] = [];
+  let match: RegExpExecArray | null;
+
+  while ((match = openingTagRegex.exec(html)) !== null) {
+    const openingTag = match[0];
+    if (parts.className && !openingTagHasClass(openingTag, parts.className)) {
+      continue;
+    }
+
+    const tagName = match[1];
+    const closingTagRegex = new RegExp(`</${escapeRegExp(tagName)}>`, "i");
+    const remainingHtml = html.slice(openingTagRegex.lastIndex);
+    const closingMatch = remainingHtml.match(closingTagRegex);
+    if (!closingMatch || closingMatch.index === undefined) {
+      continue;
+    }
+
+    const endIndex =
+      openingTagRegex.lastIndex + closingMatch.index + closingMatch[0].length;
+    const elementHtml = html.slice(match.index, endIndex);
+    elements.push(elementHtml);
+  }
+
+  return elements;
+}
+
+function openingTagHasClass(openingTag: string, className: string): boolean {
+  const classMatch = openingTag.match(/\bclass\s*=\s*(["'])(.*?)\1/i);
+  if (!classMatch) {
+    return false;
+  }
+
+  return classMatch[2].split(/\s+/).includes(className);
+}
+
+function extractSelectorText(html: string, selector: string): string {
+  const element = findElementsBySimpleSelector(html, selector)[0];
+  return element ? stripTags(element) : "";
+}
+
+function extractSelectorAttribute(html: string, selector: string): string {
+  const [elementSelector, attributeName] = selector.split("@");
+  if (!elementSelector || !attributeName) {
+    return "";
+  }
+
+  const element = findElementsBySimpleSelector(html, elementSelector)[0];
+  if (!element) {
+    return "";
+  }
+
+  return extractAttribute(element, attributeName.trim());
+}
+
+function extractAttribute(elementHtml: string, attributeName: string): string {
+  const openingTag = elementHtml.match(/^<[^>]+>/)?.[0] ?? "";
+  const escapedName = escapeRegExp(attributeName);
+  const match = openingTag.match(
+    new RegExp(`\\b${escapedName}\\s*=\\s*(["'])(.*?)\\1`, "i")
+  );
+
+  return match?.[2]?.trim() ?? "";
+}
+
+function escapeRegExp(input: string): string {
+  return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

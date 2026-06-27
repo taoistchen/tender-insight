@@ -120,7 +120,7 @@ describe("recipe crawl fallback", () => {
       collectList: async () =>
         collected(
           "remote_browser",
-          '<html><body><a href="https://example.com/detail">Remote Tender</a></body></html>'
+          '<html><body><div class="ewb-list-node"><a href="https://example.com/detail">Remote Tender</a></div></body></html>'
         ),
       collectDetail: async () =>
         collected(
@@ -146,7 +146,7 @@ describe("recipe crawl fallback", () => {
     expect(job.tendersFound).toBeGreaterThan(0);
   });
 
-  it("marks a paginated recipe crawl as failed when a later list page cannot be collected", async () => {
+  it("caps recipe crawls to one page even if a source has pagination-like metadata", async () => {
     vi.resetModules();
     vi.doMock("../recipes.js", async (importOriginal) => {
       const actual = await importOriginal<typeof import("../recipes.js")>();
@@ -172,44 +172,22 @@ describe("recipe crawl fallback", () => {
 
     const { CrawlerService: MockedCrawlerService } = await import("../service.js");
 
+    let listCollections = 0;
     const direct: CrawlExecutor = {
       strategy: "backend_fetch",
-      collectList: async (_source, page) => {
-        if (page === 1) {
-          return collected(
-            "backend_fetch",
-            '<html><body><a href="https://example.com/detail">First Tender</a></body></html>'
-          );
-        }
-
-        throw new CrawlExecutionError({
-          strategy: "backend_fetch",
-          status: "failed",
-          url: "https://example.com/list",
-          errorCode: "NETWORK_RESTRICTED",
-          message: "direct blocked"
-        });
+      collectList: async () => {
+        listCollections++;
+        return collected(
+          "backend_fetch",
+          '<html><body><a href="https://example.com/detail">First Tender</a></body></html>'
+        );
       },
       collectDetail: async () =>
         collected("backend_fetch", "<html><body>First Tender</body></html>")
     };
-    const remote: CrawlExecutor = {
-      strategy: "remote_browser",
-      collectList: async () => {
-        throw new CrawlExecutionError({
-          strategy: "remote_browser",
-          status: "failed",
-          url: "https://example.com/list",
-          errorCode: "REMOTE_BROWSER_UNAVAILABLE",
-          message: "remote unavailable"
-        });
-      },
-      collectDetail: async () =>
-        collected("remote_browser", "<html><body>First Tender</body></html>")
-    };
 
     const service = new MockedCrawlerService(undefined, {
-      executors: [direct, remote]
+      executors: [direct]
     });
 
     const job = await service.runRecipeCrawl({
@@ -218,14 +196,14 @@ describe("recipe crawl fallback", () => {
       maxPages: 2
     });
 
-    expect(job.status).toBe("failed");
+    expect(job.status).toBe("completed");
+    expect(job.pagesTotal).toBe(1);
     expect(job.pagesCrawled).toBe(1);
     expect(job.tendersFound).toBe(1);
-    expect(job.error).toContain("remote unavailable");
-    expect(job.completedAt).toBeInstanceOf(Date);
+    expect(listCollections).toBe(1);
   });
 
-  it("limits current recipes to one list page until pagination is explicit", async () => {
+  it("limits current recipes to one list page", async () => {
     let listCollections = 0;
     const direct: CrawlExecutor = {
       strategy: "backend_fetch",
@@ -233,7 +211,7 @@ describe("recipe crawl fallback", () => {
         listCollections++;
         return collected(
           "backend_fetch",
-          '<html><body><a href="https://example.com/detail">Single Tender</a></body></html>'
+          '<html><body><div class="ewb-list-node"><a href="https://example.com/detail">Single Tender</a></div></body></html>'
         );
       },
       collectDetail: async () =>
@@ -254,6 +232,44 @@ describe("recipe crawl fallback", () => {
     expect(job.pagesTotal).toBe(1);
     expect(job.pagesCrawled).toBe(1);
     expect(listCollections).toBe(1);
+  });
+
+  it("extracts recipe list items only from the configured item selector", async () => {
+    const detailUrls: string[] = [];
+    const direct: CrawlExecutor = {
+      strategy: "backend_fetch",
+      collectList: async () =>
+        collected(
+          "backend_fetch",
+          [
+            '<html><body>',
+            '<nav><a href="https://example.com/nav">Navigation Link</a></nav>',
+            '<div class="ewb-list-node">',
+            '<a href="https://example.com/detail">Real Tender</a>',
+            "</div>",
+            '<footer><a href="https://example.com/footer">Footer Link</a></footer>',
+            "</body></html>"
+          ].join("")
+        ),
+      collectDetail: async (url) => {
+        detailUrls.push(url);
+        return collected("backend_fetch", "<html><body>Real Tender</body></html>");
+      }
+    };
+
+    const service = new CrawlerService(undefined, {
+      executors: [direct]
+    });
+
+    const job = await service.runRecipeCrawl({
+      siteKey: "huaian",
+      sourceKey: "construction",
+      maxPages: 1
+    });
+
+    expect(job.status).toBe("completed");
+    expect(job.tendersFound).toBe(1);
+    expect(detailUrls).toEqual(["https://example.com/detail"]);
   });
 });
 
