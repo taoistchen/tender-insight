@@ -7,6 +7,7 @@ import { LianyungangCrawler } from "./sites/lianyungang.js";
 import { ZhenjiangCrawler, setKimiApiKey } from "./sites/zhenjiang.js";
 import { HuaianCrawler } from "./sites/huaian.js";
 import { initSchema } from "../db/schema.js";
+import { seedIfEmpty } from "../db/company-repo.js";
 import {
   upsertTender,
   getAllTenders as dbGetAllTenders,
@@ -58,6 +59,7 @@ class CrawlerService {
   async init(): Promise<void> {
     try {
       await initSchema();
+      await seedIfEmpty();
       this.dbReady = true;
       const count = await getTenderCount();
       console.log(`CrawlerService: PostgreSQL ready, ${count} tenders stored`);

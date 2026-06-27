@@ -54,6 +54,47 @@ CREATE INDEX IF NOT EXISTS idx_tender_city       ON tender_notice(city);
 CREATE INDEX IF NOT EXISTS idx_tender_deadline    ON tender_notice(deadline_time);
 CREATE INDEX IF NOT EXISTS idx_tender_created     ON tender_notice(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_analysis_decision  ON tender_analysis(decision);
+
+-- ─── Company data ───
+
+CREATE TABLE IF NOT EXISTS company_profile (
+  id                   SERIAL PRIMARY KEY,
+  company_name         VARCHAR(255) NOT NULL,
+  max_project_amount   NUMERIC(18,2) DEFAULT 20000000,
+  min_remaining_days   INT DEFAULT 5,
+  preferred_regions    TEXT[] DEFAULT '{}',
+  preferred_project_types TEXT[] DEFAULT '{}',
+  excluded_keywords    TEXT[] DEFAULT '{}',
+  created_at           TIMESTAMPTZ DEFAULT NOW(),
+  updated_at           TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS company_qualification (
+  id          SERIAL PRIMARY KEY,
+  name        VARCHAR(255) NOT NULL,
+  level       VARCHAR(50) NOT NULL,
+  valid_to    DATE,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS company_personnel (
+  id              SERIAL PRIMARY KEY,
+  person_name     VARCHAR(100) NOT NULL,
+  certificate_type VARCHAR(100),
+  major           VARCHAR(100),
+  level           VARCHAR(50),
+  valid_to        DATE,
+  created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS company_performance (
+  id              SERIAL PRIMARY KEY,
+  project_name    VARCHAR(255) NOT NULL,
+  project_type    VARCHAR(100),
+  amount          NUMERIC(18,2),
+  completion_date DATE,
+  created_at      TIMESTAMPTZ DEFAULT NOW()
+);
 `;
 
 export async function initSchema(): Promise<void> {
