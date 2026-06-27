@@ -43,3 +43,13 @@ docker compose up -d --build
 ```
 
 The app writes runtime files under `DATA_DIR`. Logs are written to stdout/stderr for Docker, systemd, or cloud log collection.
+
+## Remote Browser Crawler
+
+Remote browser collection is optional. Configure these variables on the backend server to enable Browserbase-compatible collection:
+
+- `BROWSERBASE_API_KEY`
+- `BROWSERBASE_PROJECT_ID`
+- `REMOTE_BROWSER_TIMEOUT_MS`
+
+If these variables are missing, direct fetch crawlers continue to work and remote browser jobs fail with a structured diagnostic.
