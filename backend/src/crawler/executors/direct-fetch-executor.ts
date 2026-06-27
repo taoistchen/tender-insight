@@ -1,5 +1,5 @@
 import type { CrawlSource } from "../recipes.js";
-import type { CrawlStrategyAttempt } from "../types.js";
+import type { CrawlErrorCode, CrawlStrategyAttempt } from "../types.js";
 import {
   CrawlExecutionError,
   type CollectedPage,
@@ -10,6 +10,23 @@ const FETCH_TIMEOUT_MS = 20_000;
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
   "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+
+function classifyFetchError(error: unknown): CrawlErrorCode {
+  const name = error instanceof Error ? error.name : "";
+  const message = error instanceof Error ? error.message : String(error);
+  const normalizedMessage = message.toLowerCase();
+
+  if (
+    name === "AbortError" ||
+    name === "TimeoutError" ||
+    normalizedMessage.includes("timeout") ||
+    normalizedMessage.includes("aborted")
+  ) {
+    return "TIMEOUT";
+  }
+
+  return "NETWORK_RESTRICTED";
+}
 
 export class DirectFetchExecutor implements CrawlExecutor {
   readonly strategy = "backend_fetch" as const;
@@ -65,7 +82,7 @@ export class DirectFetchExecutor implements CrawlExecutor {
         strategy: this.strategy,
         status: "failed",
         url,
-        errorCode: "NETWORK_RESTRICTED",
+        errorCode: classifyFetchError(error),
         message: String(error)
       });
     }

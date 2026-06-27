@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { DirectFetchExecutor } from "../executors/direct-fetch-executor.js";
 import type { CrawlSource } from "../recipes.js";
 
@@ -20,6 +20,10 @@ const source: CrawlSource = {
 };
 
 describe("direct fetch executor", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("collects source HTML and records a successful attempt", async () => {
     vi.stubGlobal(
       "fetch",
@@ -46,6 +50,25 @@ describe("direct fetch executor", () => {
         strategy: "backend_fetch",
         status: "failed",
         errorCode: "HTTP_ERROR"
+      }
+    });
+  });
+
+  it("classifies abort and timeout failures as timeout", async () => {
+    const timeoutError = new Error("operation timed out");
+    timeoutError.name = "TimeoutError";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw timeoutError;
+      })
+    );
+
+    await expect(new DirectFetchExecutor().collectList(source, 1)).rejects.toMatchObject({
+      attempt: {
+        strategy: "backend_fetch",
+        status: "failed",
+        errorCode: "TIMEOUT"
       }
     });
   });
