@@ -22,6 +22,7 @@ export interface CompanyProfile {
   preferredProjectTypes: string[];
   excludedKeywords: string[];
   maxProjectAmount: number;
+  minProjectAmount: number;
   minRemainingDays: number;
   qualifications: CompanyQualification[];
 }

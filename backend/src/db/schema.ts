@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS company_profile (
   id                   SERIAL PRIMARY KEY,
   company_name         VARCHAR(255) NOT NULL,
   max_project_amount   NUMERIC(18,2) DEFAULT 20000000,
+  min_project_amount   NUMERIC(18,2) DEFAULT 0,
   min_remaining_days   INT DEFAULT 5,
   preferred_regions    TEXT[] DEFAULT '{}',
   preferred_project_types TEXT[] DEFAULT '{}',
@@ -101,6 +102,13 @@ export async function initSchema(): Promise<void> {
   const client = await pool.connect();
   try {
     await client.query(SCHEMA_SQL);
+    // Migration: add min_project_amount if column doesn't exist yet
+    await client.query(
+      `DO $$ BEGIN
+         ALTER TABLE company_profile ADD COLUMN min_project_amount NUMERIC(18,2) DEFAULT 0;
+       EXCEPTION WHEN duplicate_column THEN NULL;
+       END $$;`
+    );
     console.log("Database schema initialized");
   } finally {
     client.release();

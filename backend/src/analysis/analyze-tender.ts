@@ -120,11 +120,17 @@ export function analyzeTender(
     matchedPoints.push("未发现明确业绩硬性限制");
   }
 
-  if (tender.budgetAmount !== undefined && tender.budgetAmount <= company.maxProjectAmount) {
-    score += 10;
-    matchedPoints.push("项目金额在公司承接范围内");
-  } else if (tender.budgetAmount !== undefined) {
-    return rejected(score, matchedPoints, ["项目金额超过公司最大承接范围"]);
+  if (tender.budgetAmount !== undefined) {
+    const minOk = company.minProjectAmount === undefined || company.minProjectAmount === 0 || tender.budgetAmount >= company.minProjectAmount;
+    const maxOk = tender.budgetAmount <= company.maxProjectAmount;
+    if (minOk && maxOk) {
+      score += 10;
+      matchedPoints.push("项目金额在公司承接范围内");
+    } else if (!maxOk) {
+      return rejected(score, matchedPoints, ["项目金额超过公司最大承接范围"]);
+    } else {
+      riskPoints.push(`项目金额低于公司最小承接金额（${company.minProjectAmount.toLocaleString()} 元），可能需要评估`);
+    }
   }
 
   const remainingDays = tender.deadlineTime

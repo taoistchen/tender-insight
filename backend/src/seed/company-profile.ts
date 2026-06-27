@@ -6,6 +6,7 @@ export const seedCompanyProfile: CompanyProfile = {
   preferredProjectTypes: ["建筑", "消防", "装修", "防水", "防腐", "保温", "结构补强", "改造"],
   excludedKeywords: ["监理", "设计", "勘察", "审计", "造价咨询"],
   maxProjectAmount: 20_000_000,
+  minProjectAmount: 0,
   minRemainingDays: 5,
   qualifications: [
     {

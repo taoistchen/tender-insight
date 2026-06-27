@@ -14,7 +14,7 @@ interface ApiTender {
 }
 
 interface CompanyProfile {
-  id: number; companyName: string; maxProjectAmount: number; minRemainingDays: number;
+  id: number; companyName: string; maxProjectAmount: number; minProjectAmount: number; minRemainingDays: number;
   preferredRegions: string[]; preferredProjectTypes: string[]; excludedKeywords: string[];
   qualifications?: Qualification[];
 }
@@ -377,7 +377,10 @@ export function App() {
                 <div style={{ fontSize: 12, color: "var(--color-muted)", margin: "6px 0 2px" }}>排除关键词</div>
                 <div className="preference-tags">{company.excludedKeywords?.map(r => <span key={r} className="preference-tag preference-tag--exclude">{r}</span>)}</div>
                 <p className="qualification-section-title">承接能力</p>
-                <div style={{ fontSize: 13, lineHeight: 1.8 }}>最大金额：<strong>{formatAmount(company.maxProjectAmount)}</strong><br/>最低准备：<strong>{company.minRemainingDays} 天</strong></div>
+                <div style={{ fontSize: 13, lineHeight: 1.8 }}>
+                  金额范围：<strong>{formatAmount(company.minProjectAmount)} ~ {formatAmount(company.maxProjectAmount)}</strong><br/>
+                  最低准备：<strong>{company.minRemainingDays} 天</strong>
+                </div>
               </>}
             </aside>
           </section>
@@ -500,6 +503,7 @@ export function App() {
                       <AdminForm
                         fields={[
                           { key: "companyName", label: "公司名称" },
+                          { key: "minProjectAmount", label: "最小承接金额(元)" },
                           { key: "maxProjectAmount", label: "最大承接金额(元)" },
                           { key: "minRemainingDays", label: "最低准备天数" },
                           { key: "preferredRegions", label: "可投城市(逗号分隔)" },
@@ -508,6 +512,7 @@ export function App() {
                         ]}
                         initial={{
                           companyName: prefs.companyName,
+                          minProjectAmount: String(prefs.minProjectAmount),
                           maxProjectAmount: String(prefs.maxProjectAmount),
                           minRemainingDays: String(prefs.minRemainingDays),
                           preferredRegions: prefs.preferredRegions.join(", "),
@@ -518,6 +523,7 @@ export function App() {
                         onSubmit={data => {
                           saveItem(`${API}/company/profile`, "PUT", {
                             companyName: data.companyName,
+                            minProjectAmount: Number(data.minProjectAmount),
                             maxProjectAmount: Number(data.maxProjectAmount),
                             minRemainingDays: Number(data.minRemainingDays),
                             preferredRegions: data.preferredRegions.split(/[,，]+/).map((s: string) => s.trim()).filter(Boolean),

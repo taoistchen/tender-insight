@@ -6,6 +6,7 @@ export interface CompanyProfile {
   id: number;
   companyName: string;
   maxProjectAmount: number;
+  minProjectAmount: number;
   minRemainingDays: number;
   preferredRegions: string[];
   preferredProjectTypes: string[];
@@ -48,6 +49,7 @@ export async function getProfile(): Promise<CompanyProfile | null> {
     id: r.id as number,
     companyName: r.company_name as string,
     maxProjectAmount: Number(r.max_project_amount),
+    minProjectAmount: Number(r.min_project_amount ?? 0),
     minRemainingDays: r.min_remaining_days as number,
     preferredRegions: (r.preferred_regions as string[]) ?? [],
     preferredProjectTypes: (r.preferred_project_types as string[]) ?? [],
@@ -58,6 +60,7 @@ export async function getProfile(): Promise<CompanyProfile | null> {
 export async function upsertProfile(data: {
   companyName: string;
   maxProjectAmount?: number;
+  minProjectAmount?: number;
   minRemainingDays?: number;
   preferredRegions?: string[];
   preferredProjectTypes?: string[];
@@ -69,15 +72,16 @@ export async function upsertProfile(data: {
       `UPDATE company_profile SET
          company_name = COALESCE($2, company_name),
          max_project_amount = COALESCE($3, max_project_amount),
-         min_remaining_days = COALESCE($4, min_remaining_days),
-         preferred_regions = COALESCE($5, preferred_regions),
-         preferred_project_types = COALESCE($6, preferred_project_types),
-         excluded_keywords = COALESCE($7, excluded_keywords),
+         min_project_amount = COALESCE($4, min_project_amount),
+         min_remaining_days = COALESCE($5, min_remaining_days),
+         preferred_regions = COALESCE($6, preferred_regions),
+         preferred_project_types = COALESCE($7, preferred_project_types),
+         excluded_keywords = COALESCE($8, excluded_keywords),
          updated_at = NOW()
        WHERE id = $1 RETURNING *`,
       [
         existing.id, data.companyName, data.maxProjectAmount,
-        data.minRemainingDays, data.preferredRegions,
+        data.minProjectAmount, data.minRemainingDays, data.preferredRegions,
         data.preferredProjectTypes, data.excludedKeywords
       ]
     );
@@ -85,12 +89,12 @@ export async function upsertProfile(data: {
   }
   const r = await pool.query(
     `INSERT INTO company_profile
-       (company_name, max_project_amount, min_remaining_days,
+       (company_name, max_project_amount, min_project_amount, min_remaining_days,
         preferred_regions, preferred_project_types, excluded_keywords)
-     VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
     [
       data.companyName, data.maxProjectAmount ?? 20_000_000,
-      data.minRemainingDays ?? 5,
+      data.minProjectAmount ?? 0, data.minRemainingDays ?? 5,
       data.preferredRegions ?? [],
       data.preferredProjectTypes ?? [],
       data.excludedKeywords ?? []
@@ -104,6 +108,7 @@ function rowToProfile(r: Record<string, unknown>): CompanyProfile {
     id: r.id as number,
     companyName: r.company_name as string,
     maxProjectAmount: Number(r.max_project_amount),
+    minProjectAmount: Number(r.min_project_amount ?? 0),
     minRemainingDays: r.min_remaining_days as number,
     preferredRegions: (r.preferred_regions as string[]) ?? [],
     preferredProjectTypes: (r.preferred_project_types as string[]) ?? [],
@@ -280,6 +285,7 @@ export async function seedIfEmpty(): Promise<void> {
   await upsertProfile({
     companyName: "江苏亚亿建设集团有限公司",
     maxProjectAmount: 20_000_000,
+    minProjectAmount: 0,
     minRemainingDays: 5,
     preferredRegions: ["南京", "淮安", "镇江", "连云港"],
     preferredProjectTypes: ["建筑", "消防", "装修", "防水", "防腐", "保温", "结构补强", "改造"],
