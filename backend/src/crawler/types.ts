@@ -1,6 +1,29 @@
 import type { TenderNotice } from "../domain/types.js";
 import type { ExtractedTenderFields } from "../tender/extract-tender-fields.js";
 
+export type CrawlStrategy = "backend_fetch" | "remote_browser";
+
+export type CrawlErrorCode =
+  | "NETWORK_RESTRICTED"
+  | "SEARCH_INDEX_EMPTY"
+  | "PLATFORM_UNAVAILABLE"
+  | "HTTP_ERROR"
+  | "TIMEOUT"
+  | "SELECTOR_NOT_FOUND"
+  | "EMPTY_RESULT"
+  | "REMOTE_BROWSER_UNAVAILABLE"
+  | "DETAIL_FETCH_FAILED"
+  | "PARSER_FAILED";
+
+export interface CrawlStrategyAttempt {
+  strategy: CrawlStrategy;
+  status: "succeeded" | "failed" | "skipped";
+  url: string;
+  errorCode?: CrawlErrorCode;
+  message?: string;
+  screenshotPath?: string;
+}
+
 /** Raw list item scraped from a tender listing page. */
 export interface TenderListItem {
   /** Unique section/notice identifier from the source site. */
@@ -51,6 +74,8 @@ export interface TenderCrawler {
 export interface CrawlJob {
   id: string;
   siteName: string;
+  siteKey?: string;
+  sourceKey?: string;
   status: "running" | "completed" | "failed" | "skipped";
   startedAt: Date;
   completedAt?: Date;
@@ -58,16 +83,17 @@ export interface CrawlJob {
   pagesCrawled: number;
   tendersFound: number;
   tendersNew: number;
+  strategyAttempts?: CrawlStrategyAttempt[];
   errorCode?: string;
   error?: string;
   recommendedAction?: string;
 }
 
 export interface CrawlerUnavailableOptions {
-  code:
-    | "NETWORK_RESTRICTED"
-    | "SEARCH_INDEX_EMPTY"
-    | "PLATFORM_UNAVAILABLE";
+  code: Extract<
+    CrawlErrorCode,
+    "NETWORK_RESTRICTED" | "SEARCH_INDEX_EMPTY" | "PLATFORM_UNAVAILABLE"
+  >;
   message: string;
   recommendedAction: string;
 }
