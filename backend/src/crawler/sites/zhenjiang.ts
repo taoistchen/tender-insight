@@ -5,6 +5,7 @@ import type {
   TenderCrawler,
   TenderListItem
 } from "../types.js";
+import { CrawlerUnavailableError } from "../types.js";
 
 const BASE_URL = "http://ggzy.zhenjiang.gov.cn";
 const SEARCH_URL = `${BASE_URL}/inteligentsearch/rest/inteligentSearch/getFullTextData`;
@@ -92,6 +93,15 @@ export class ZhenjiangCrawler implements TenderCrawler {
 
     const records = data.result?.records ?? [];
     const total = data.result?.totalcount ?? 0;
+
+    if (total === 0 && records.length === 0) {
+      throw new CrawlerUnavailableError({
+        code: "SEARCH_INDEX_EMPTY",
+        message:
+          "镇江公共资源交易搜索接口可访问，但建设工程招标公告索引为空，无法返回公告列表。",
+        recommendedAction: "联系平台方修复镇江公共资源交易搜索索引后重试"
+      });
+    }
 
     const items: TenderListItem[] = records.map((r) => ({
       sectionNo: r.infoid ?? "",

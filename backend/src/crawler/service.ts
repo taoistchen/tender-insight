@@ -13,6 +13,7 @@ import {
   loadRequirements,
   getTenderCount
 } from "../db/tender-repo.js";
+import { CrawlerUnavailableError } from "./types.js";
 import type { CrawlJob, TenderCrawler, TenderListItem } from "./types.js";
 
 /** A tender with its analysis result, as returned by the API. */
@@ -40,14 +41,17 @@ class CrawlerService {
   private crawlers: TenderCrawler[] = [];
   private dbReady = false;
 
-  constructor() {
+  constructor(crawlers?: TenderCrawler[]) {
     const kimiKey = process.env["KIMI_API_KEY"] ?? "";
     if (kimiKey) setKimiApiKey(kimiKey);
 
-    this.crawlers.push(new NanjingCrawler());
-    this.crawlers.push(new LianyungangCrawler());
-    this.crawlers.push(new ZhenjiangCrawler());
-    this.crawlers.push(new HuaianCrawler());
+    this.crawlers =
+      crawlers ?? [
+        new NanjingCrawler(),
+        new LianyungangCrawler(),
+        new ZhenjiangCrawler(),
+        new HuaianCrawler()
+      ];
   }
 
   /** Call once at startup. Initialises DB schema and loads existing data. */
@@ -156,6 +160,15 @@ class CrawlerService {
 
       job.status = "completed";
     } catch (err) {
+      if (err instanceof CrawlerUnavailableError) {
+        job.status = "skipped";
+        job.errorCode = err.code;
+        job.error = err.message;
+        job.recommendedAction = err.recommendedAction;
+        job.completedAt = new Date();
+        return job;
+      }
+
       job.status = "failed";
       job.error = String(err);
     }
@@ -170,3 +183,4 @@ class CrawlerService {
 }
 
 export const crawlerService = new CrawlerService();
+export { CrawlerService };

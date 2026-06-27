@@ -4,6 +4,7 @@ import type {
   TenderCrawler,
   TenderListItem
 } from "../types.js";
+import { CrawlerUnavailableError } from "../types.js";
 
 /**
  * Crawler for 淮安市公共资源交易平台.
@@ -21,13 +22,19 @@ export class HuaianCrawler implements TenderCrawler {
   readonly offline = true;
 
   async fetchList(): Promise<CrawlPageResult> {
-    throw new Error(
-      "淮安市公共资源交易平台 (ggzy.huaian.gov.cn) 从当前服务器无法连接，" +
-      "可能受IP地域限制。建议通过VPN或代理服务器访问。"
-    );
+    throw new CrawlerUnavailableError({
+      code: "NETWORK_RESTRICTED",
+      message:
+        "淮安市公共资源交易平台 (ggzy.huaian.gov.cn) 从当前服务器无法连接，可能受 IP 地域限制。",
+      recommendedAction: "使用省内 IP 或 VPN 后重试"
+    });
   }
 
   async fetchDetail(_item: TenderListItem): Promise<TenderNotice> {
-    throw new Error("淮安平台网络不可达，暂不支持");
+    throw new CrawlerUnavailableError({
+      code: "NETWORK_RESTRICTED",
+      message: "淮安平台网络不可达，暂不支持详情采集。",
+      recommendedAction: "使用省内 IP 或 VPN 后重试"
+    });
   }
 }

@@ -51,12 +51,35 @@ export interface TenderCrawler {
 export interface CrawlJob {
   id: string;
   siteName: string;
-  status: "running" | "completed" | "failed";
+  status: "running" | "completed" | "failed" | "skipped";
   startedAt: Date;
   completedAt?: Date;
   pagesTotal: number;
   pagesCrawled: number;
   tendersFound: number;
   tendersNew: number;
+  errorCode?: string;
   error?: string;
+  recommendedAction?: string;
+}
+
+export interface CrawlerUnavailableOptions {
+  code:
+    | "NETWORK_RESTRICTED"
+    | "SEARCH_INDEX_EMPTY"
+    | "PLATFORM_UNAVAILABLE";
+  message: string;
+  recommendedAction: string;
+}
+
+export class CrawlerUnavailableError extends Error {
+  readonly code: CrawlerUnavailableOptions["code"];
+  readonly recommendedAction: string;
+
+  constructor(options: CrawlerUnavailableOptions) {
+    super(options.message);
+    this.name = "CrawlerUnavailableError";
+    this.code = options.code;
+    this.recommendedAction = options.recommendedAction;
+  }
 }
