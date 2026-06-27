@@ -135,10 +135,10 @@ class CrawlerService {
             const analysis = analyzeTender(tender, seedCompanyProfile);
             const enriched: EnrichedTender = { ...tender, analysis };
 
-            // Persist to PostgreSQL
+            // Persist to PostgreSQL (upsert dedup by URL)
             if (this.dbReady) {
-              const saved = await upsertTender(enriched);
-              if (saved) job.tendersNew++;
+              const { saved, isNew } = await upsertTender(enriched);
+              if (saved && isNew) job.tendersNew++;
             } else {
               // In-memory fallback
               if (!this.tenders.has(tender.url)) {

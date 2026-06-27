@@ -21,12 +21,13 @@ interface ReqRow { url: string; requirement: string; }
 
 export async function upsertTender(
   tender: EnrichedTender
-): Promise<boolean> {
+): Promise<{ saved: boolean; isNew: boolean }> {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
 
-    // Upsert tender notice
+    // Upsert tender notice.  xmax=0 means the row was freshly inserted;
+    // xmax!=0 means it was an existing row that was updated.
     const tenderResult = await client.query(
       `INSERT INTO tender_notice
          (url, city, title, source_site, content_text,
@@ -37,20 +38,22 @@ export async function upsertTender(
          content_text = EXCLUDED.content_text,
          budget_amount = EXCLUDED.budget_amount,
          deadline_time = EXCLUDED.deadline_time
-       RETURNING id`,
+       RETURNING id, (xmax = 0) AS is_new`,
       [
         tender.url,
         tender.city,
         tender.title,
-        tender.city, // source_site — use city as label for now
+        tender.city,
         tender.contentText ?? "",
         tender.budgetAmount ?? null,
         tender.deadlineTime ?? null,
-        null // publish_date
+        null
       ]
     );
 
-    const tenderId = tenderResult.rows[0].id as number;
+    const row = tenderResult.rows[0] as { id: number; is_new: boolean };
+    const tenderId = row.id;
+    const isNew = row.is_new;
 
     // Clear and re-insert qualifications
     await client.query(
@@ -112,11 +115,11 @@ export async function upsertTender(
     );
 
     await client.query("COMMIT");
-    return true;
+    return { saved: true, isNew };
   } catch (err) {
     await client.query("ROLLBACK");
     console.error("upsertTender error:", err);
-    return false;
+    return { saved: false, isNew: false };
   } finally {
     client.release();
   }
