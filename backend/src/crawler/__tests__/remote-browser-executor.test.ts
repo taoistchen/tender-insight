@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { RemoteBrowserExecutor } from "../executors/remote-browser-executor.js";
+import {
+  createRemoteBrowserConnection,
+  RemoteBrowserExecutor
+} from "../executors/remote-browser-executor.js";
 import type { RemoteBrowserProvider } from "../executors/types.js";
 import type { CrawlSource } from "../recipes.js";
 
@@ -91,5 +94,25 @@ describe("remote browser executor", () => {
         errorCode: "SELECTOR_NOT_FOUND"
       }
     });
+  });
+
+  it("closes a partially connected browser when page setup fails", async () => {
+    const setupError = new Error("new context failed");
+    const browser = {
+      close: vi.fn(async () => undefined),
+      contexts: vi.fn(() => []),
+      newContext: vi.fn(async () => {
+        throw setupError;
+      })
+    };
+
+    await expect(
+      createRemoteBrowserConnection(
+        "ws://example.test",
+        async () => browser as never
+      )
+    ).rejects.toBe(setupError);
+
+    expect(browser.close).toHaveBeenCalledOnce();
   });
 });

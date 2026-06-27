@@ -26,6 +26,8 @@ interface RemoteBrowserExecutorOptions {
   connector?: RemoteBrowserConnector;
 }
 
+type ConnectOverCdp = (connectUrl: string) => Promise<Browser>;
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -51,14 +53,33 @@ function selectorFailure(url: string, selector: string, error: unknown): never {
   });
 }
 
-async function defaultConnector(
+export async function createRemoteBrowserConnection(
+  connectUrl: string,
+  connectOverCdp: ConnectOverCdp
+): Promise<RemoteBrowserConnection> {
+  let browser: Browser | undefined;
+
+  try {
+    browser = await connectOverCdp(connectUrl);
+    const context = browser.contexts()[0] ?? (await browser.newContext());
+    const page = context.pages()[0] ?? (await context.newPage());
+
+    return { browser, page };
+  } catch (error) {
+    if (browser) {
+      await browser.close().catch(() => undefined);
+    }
+
+    throw error;
+  }
+}
+
+function defaultConnector(
   connectUrl: string
 ): Promise<RemoteBrowserConnection> {
-  const browser = await chromium.connectOverCDP(connectUrl);
-  const context = browser.contexts()[0] ?? (await browser.newContext());
-  const page = context.pages()[0] ?? (await context.newPage());
-
-  return { browser, page };
+  return createRemoteBrowserConnection(connectUrl, (url) =>
+    chromium.connectOverCDP(url)
+  );
 }
 
 export class RemoteBrowserExecutor implements CrawlExecutor {
