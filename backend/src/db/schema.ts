@@ -1,0 +1,67 @@
+import { pool } from "./pool.js";
+
+const SCHEMA_SQL = `
+-- Tender notices scraped from government platforms
+CREATE TABLE IF NOT EXISTS tender_notice (
+  id            SERIAL PRIMARY KEY,
+  url           TEXT UNIQUE NOT NULL,
+  city          VARCHAR(50) NOT NULL,
+  title         TEXT NOT NULL,
+  source_site   VARCHAR(100),
+  content_text  TEXT,
+  budget_amount NUMERIC(18,2),
+  deadline_time TIMESTAMPTZ,
+  publish_date  DATE,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Qualification requirements extracted from each tender
+CREATE TABLE IF NOT EXISTS tender_qualification (
+  id          SERIAL PRIMARY KEY,
+  tender_id   INT REFERENCES tender_notice(id) ON DELETE CASCADE,
+  name        VARCHAR(255) NOT NULL,
+  level       VARCHAR(50)
+);
+
+-- Personnel requirements extracted from each tender
+CREATE TABLE IF NOT EXISTS tender_personnel (
+  id          SERIAL PRIMARY KEY,
+  tender_id   INT REFERENCES tender_notice(id) ON DELETE CASCADE,
+  requirement TEXT NOT NULL
+);
+
+-- Performance requirements extracted from each tender
+CREATE TABLE IF NOT EXISTS tender_performance (
+  id          SERIAL PRIMARY KEY,
+  tender_id   INT REFERENCES tender_notice(id) ON DELETE CASCADE,
+  requirement TEXT NOT NULL
+);
+
+-- Analysis result for each tender
+CREATE TABLE IF NOT EXISTS tender_analysis (
+  id                    SERIAL PRIMARY KEY,
+  tender_id             INT REFERENCES tender_notice(id) ON DELETE CASCADE UNIQUE,
+  decision              VARCHAR(50) NOT NULL,
+  match_score           INT DEFAULT 0,
+  matched_points        JSONB DEFAULT '[]',
+  risk_points           JSONB DEFAULT '[]',
+  manual_review_required BOOLEAN DEFAULT FALSE,
+  created_at            TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Indexes for common queries
+CREATE INDEX IF NOT EXISTS idx_tender_city       ON tender_notice(city);
+CREATE INDEX IF NOT EXISTS idx_tender_deadline    ON tender_notice(deadline_time);
+CREATE INDEX IF NOT EXISTS idx_tender_created     ON tender_notice(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_analysis_decision  ON tender_analysis(decision);
+`;
+
+export async function initSchema(): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query(SCHEMA_SQL);
+    console.log("Database schema initialized");
+  } finally {
+    client.release();
+  }
+}

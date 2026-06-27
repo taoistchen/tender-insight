@@ -3,7 +3,7 @@ import { crawlerService } from "../crawler/service.js";
 
 export const tendersRouter = Router();
 
-tendersRouter.get("/tenders", (_request, response) => {
-  const tenders = crawlerService.getAllTenders();
+tendersRouter.get("/tenders", async (_request, response) => {
+  const tenders = await crawlerService.getAllTenders();
   response.json(tenders);
 });

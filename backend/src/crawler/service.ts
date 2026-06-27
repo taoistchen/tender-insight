@@ -6,6 +6,13 @@ import { NanjingCrawler } from "./sites/nanjing.js";
 import { LianyungangCrawler } from "./sites/lianyungang.js";
 import { ZhenjiangCrawler, setKimiApiKey } from "./sites/zhenjiang.js";
 import { HuaianCrawler } from "./sites/huaian.js";
+import { initSchema } from "../db/schema.js";
+import {
+  upsertTender,
+  getAllTenders as dbGetAllTenders,
+  loadRequirements,
+  getTenderCount
+} from "../db/tender-repo.js";
 import type { CrawlJob, TenderCrawler, TenderListItem } from "./types.js";
 
 /** A tender with its analysis result, as returned by the API. */
@@ -13,6 +20,7 @@ export interface EnrichedTender {
   city: string;
   url: string;
   title: string;
+  contentText?: string;
   budgetAmount?: number;
   deadlineTime?: Date;
   qualificationRequirements: { name: string; level: string }[];
@@ -22,19 +30,17 @@ export interface EnrichedTender {
 }
 
 /**
- * In-memory tender store + crawl orchestrator.
+ * Crawl orchestrator backed by PostgreSQL.
  *
- * In production this would be backed by PostgreSQL (already defined in
- * docker-compose.yml).  For the MVP the in-memory store avoids DB
- * complexity while the rest of the system stabilizes.
+ * Falls back to in-memory only if the database is unreachable at startup.
  */
 class CrawlerService {
   private tenders: Map<string, EnrichedTender> = new Map();
   private jobs: CrawlJob[] = [];
   private crawlers: TenderCrawler[] = [];
+  private dbReady = false;
 
   constructor() {
-    // Inject Kimi API key for captcha solving
     const kimiKey = process.env["KIMI_API_KEY"] ?? "";
     if (kimiKey) setKimiApiKey(kimiKey);
 
@@ -44,10 +50,33 @@ class CrawlerService {
     this.crawlers.push(new HuaianCrawler());
   }
 
+  /** Call once at startup. Initialises DB schema and loads existing data. */
+  async init(): Promise<void> {
+    try {
+      await initSchema();
+      this.dbReady = true;
+      const count = await getTenderCount();
+      console.log(`CrawlerService: PostgreSQL ready, ${count} tenders stored`);
+    } catch (err) {
+      console.warn(
+        `CrawlerService: PostgreSQL unavailable (${String(err)}), using in-memory store`
+      );
+      this.dbReady = false;
+    }
+  }
+
   /* ─── Public API ─── */
 
-  /** Return all crawled tenders with analysis, newest first. */
-  getAllTenders(): EnrichedTender[] {
+  async getAllTenders(): Promise<EnrichedTender[]> {
+    if (this.dbReady) {
+      try {
+        const tenders = await dbGetAllTenders();
+        await loadRequirements(tenders);
+        return tenders;
+      } catch (err) {
+        console.warn("DB read failed, falling back to memory:", String(err));
+      }
+    }
     return [...this.tenders.values()].sort((a, b) => {
       const da = a.deadlineTime?.getTime() ?? 0;
       const db = b.deadlineTime?.getTime() ?? 0;
@@ -55,7 +84,6 @@ class CrawlerService {
     });
   }
 
-  /** Return a single crawler's status info. */
   getCrawlers(): { siteName: string; city: string }[] {
     return this.crawlers.map((c) => ({
       siteName: c.siteName,
@@ -63,14 +91,12 @@ class CrawlerService {
     }));
   }
 
-  /** Return recent crawl jobs. */
   getJobs(): CrawlJob[] {
     return [...this.jobs].sort(
       (a, b) => b.startedAt.getTime() - a.startedAt.getTime()
     );
   }
 
-  /** Trigger a crawl for a specific site. */
   async runCrawl(
     siteName?: string,
     maxPages = 3
@@ -103,15 +129,24 @@ class CrawlerService {
 
         for (const item of result.items) {
           job.tendersFound++;
-          if (this.tenders.has(item.detailUrl)) continue;
 
           try {
             const tender = await crawler.fetchDetail(item);
             const analysis = analyzeTender(tender, seedCompanyProfile);
-            this.tenders.set(tender.url, { ...tender, analysis });
-            job.tendersNew++;
+            const enriched: EnrichedTender = { ...tender, analysis };
+
+            // Persist to PostgreSQL
+            if (this.dbReady) {
+              const saved = await upsertTender(enriched);
+              if (saved) job.tendersNew++;
+            } else {
+              // In-memory fallback
+              if (!this.tenders.has(tender.url)) {
+                this.tenders.set(tender.url, enriched);
+                job.tendersNew++;
+              }
+            }
           } catch (err) {
-            // Individual detail fetch failure is non-fatal
             console.warn(
               `Failed to fetch detail for ${item.detailUrl}: ${String(err)}`
             );
@@ -129,11 +164,9 @@ class CrawlerService {
     return job;
   }
 
-  /** Number of tenders currently in store. */
   get count(): number {
     return this.tenders.size;
   }
 }
 
-/** Singleton — shared across all route modules. */
 export const crawlerService = new CrawlerService();

@@ -6,6 +6,7 @@ import { companyRouter } from "./routes/company.js";
 import { crawlerRouter } from "./routes/crawler.js";
 import { healthRouter } from "./routes/health.js";
 import { tendersRouter } from "./routes/tenders.js";
+import { crawlerService } from "./crawler/service.js";
 
 const app = express();
 
@@ -23,8 +24,18 @@ if (fs.existsSync(config.PUBLIC_DIR)) {
   });
 }
 
-app.listen(config.PORT, config.HOST, () => {
-  console.log(
-    `Tender Insight backend listening on http://${config.HOST}:${config.PORT}`
-  );
+async function start() {
+  // Initialize database schema and load persisted data
+  await crawlerService.init();
+
+  app.listen(config.PORT, config.HOST, () => {
+    console.log(
+      `Tender Insight backend listening on http://${config.HOST}:${config.PORT}`
+    );
+  });
+}
+
+start().catch((err) => {
+  console.error("Failed to start server:", err);
+  process.exit(1);
 });
