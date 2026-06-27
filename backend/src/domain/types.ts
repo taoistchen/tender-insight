@@ -29,6 +29,7 @@ export interface CompanyProfile {
 export interface TenderNotice {
   city: string;
   title: string;
+  url: string;
   contentText: string;
   budgetAmount?: number;
   deadlineTime?: Date;

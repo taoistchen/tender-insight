@@ -5,6 +5,7 @@ import type { TenderNotice } from "../../domain/types.js";
 
 const baseTender: TenderNotice = {
   city: "南京",
+  url: "https://njggzy.nanjing.gov.cn/njweb/jyxx/071001/20260701/xxxx.html",
   title: "某办公楼装修改造工程施工招标公告",
   contentText:
     "投标人须具备建筑装修装饰工程专业承包二级及以上资质。合同估算价：300万元。投标截止时间：2026年07月15日 09:30。",
@@ -133,6 +134,7 @@ describe("analyzeTender", () => {
       const result = analyzeTender(
         {
           city: "南京",
+          url: "https://njggzy.nanjing.gov.cn/njweb/jyxx/071001/20260703/wwww.html",
           title: "某综合楼排水管道工程施工招标公告",
           contentText:
             "本项目采用资格后审方式。投标截止时间：2026年07月15日 09:30。",
