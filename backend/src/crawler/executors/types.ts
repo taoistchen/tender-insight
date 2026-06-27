@@ -1,14 +1,6 @@
 import type { CrawlSource } from "../recipes.js";
 import type { CrawlStrategy, CrawlStrategyAttempt } from "../types.js";
 
-type Browser = {
-  close(): Promise<void>;
-};
-
-type Page = {
-  close(): Promise<void>;
-};
-
 export interface CollectedPage {
   strategy: CrawlStrategy;
   url: string;
@@ -43,9 +35,4 @@ export interface RemoteBrowserSession {
 export interface RemoteBrowserProvider {
   createSession(): Promise<RemoteBrowserSession>;
   closeSession(sessionId: string): Promise<void>;
-}
-
-export interface ConnectedBrowser {
-  browser: Browser;
-  page: Page;
 }

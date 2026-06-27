@@ -146,7 +146,7 @@ describe("recipe crawl fallback", () => {
     expect(job.tendersFound).toBeGreaterThan(0);
   });
 
-  it("caps recipe crawls to one page even if a source has pagination-like metadata", async () => {
+  it("crawls multiple pages when source maxPages allows", async () => {
     vi.resetModules();
     vi.doMock("../recipes.js", async (importOriginal) => {
       const actual = await importOriginal<typeof import("../recipes.js")>();
@@ -162,8 +162,7 @@ describe("recipe crawl fallback", () => {
           },
           source: {
             ...source,
-            maxPages: 2,
-            pagination: { type: "page" }
+            maxPages: 2
           },
           maxPages: 2
         })
@@ -197,13 +196,13 @@ describe("recipe crawl fallback", () => {
     });
 
     expect(job.status).toBe("completed");
-    expect(job.pagesTotal).toBe(1);
-    expect(job.pagesCrawled).toBe(1);
-    expect(job.tendersFound).toBe(1);
-    expect(listCollections).toBe(1);
+    expect(job.pagesTotal).toBe(2);
+    expect(job.pagesCrawled).toBe(2);
+    expect(job.tendersFound).toBe(2);
+    expect(listCollections).toBe(2);
   });
 
-  it("limits current recipes to one list page", async () => {
+  it("crawls up to the configured maxPages", async () => {
     let listCollections = 0;
     const direct: CrawlExecutor = {
       strategy: "backend_fetch",
@@ -229,9 +228,10 @@ describe("recipe crawl fallback", () => {
     });
 
     expect(job.status).toBe("completed");
-    expect(job.pagesTotal).toBe(1);
-    expect(job.pagesCrawled).toBe(1);
-    expect(listCollections).toBe(1);
+    // resolveRecipeSource caps at source.maxPages (2), requested is 2 → maxPages = 2
+    expect(job.pagesTotal).toBe(2);
+    expect(job.pagesCrawled).toBe(2);
+    expect(listCollections).toBe(2);
   });
 
   it("extracts recipe list items only from the configured item selector", async () => {

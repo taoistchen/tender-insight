@@ -136,8 +136,10 @@ export class RemoteBrowserExecutor implements CrawlExecutor {
   }
 
   collectList(source: CrawlSource, page: number): Promise<CollectedPage> {
-    void page;
-    return this.collect(source.url, source.actions);
+    const url = page > 1
+      ? (() => { const u = new URL(source.url); u.searchParams.set("page", String(page)); return u.toString(); })()
+      : source.url;
+    return this.collect(url, source.actions);
   }
 
   collectDetail(url: string): Promise<CollectedPage> {

@@ -31,6 +31,7 @@ const company: CompanyProfile = {
 
 const baseTender: TenderNotice = {
   city: "Nanjing",
+  sourceSite: "南京市公共资源交易平台",
   url: "https://example.com/tender/1",
   title: "Hospital renovation construction tender",
   contentText: "Construction tender",

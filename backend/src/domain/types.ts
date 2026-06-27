@@ -71,6 +71,7 @@ export interface TenderAttachment {
 
 export interface TenderNotice {
   city: string;
+  sourceSite: string;
   title: string;
   url: string;
   contentText: string;

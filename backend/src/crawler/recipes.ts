@@ -1,10 +1,10 @@
 import { z } from "zod";
+import type { CrawlStrategy } from "./types.js";
 
 const selectorSchema = z.string().min(1);
 const timeoutMsSchema = z.number().int().positive().max(60000).optional();
 
 export const crawlStrategySchema = z.enum(["backend_fetch", "remote_browser"]);
-export type CrawlStrategy = z.infer<typeof crawlStrategySchema>;
 
 export const crawlActionSchema = z.discriminatedUnion("type", [
   z.object({

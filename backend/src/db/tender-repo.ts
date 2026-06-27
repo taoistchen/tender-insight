@@ -1,10 +1,16 @@
 import { pool } from "./pool.js";
-import type { TenderAnalysisResult } from "../domain/types.js";
+import type { TenderAnalysisResult, TenderAttachmentStatus } from "../domain/types.js";
 import type { EnrichedTender } from "../crawler/service.js";
+
+/** Strip NUL bytes and other problematic characters for PostgreSQL TEXT fields. */
+function sanitizeText(value: string): string {
+  return value.replace(/\x00/g, "");
+}
 
 interface TenderRow {
   url: string;
   city: string;
+  source_site: string;
   title: string;
   content_text: string | null;
   source_html: string | null;
@@ -46,6 +52,7 @@ export async function upsertTender(
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
        ON CONFLICT (url) DO UPDATE SET
          title = EXCLUDED.title,
+         source_site = EXCLUDED.source_site,
          content_text = EXCLUDED.content_text,
          source_html = EXCLUDED.source_html,
          budget_amount = EXCLUDED.budget_amount,
@@ -55,9 +62,9 @@ export async function upsertTender(
         tender.url,
         tender.city,
         tender.title,
-        tender.city,
-        tender.contentText ?? "",
-        tender.sourceHtml ?? null,
+        tender.sourceSite,
+        sanitizeText(tender.contentText ?? ""),
+        tender.sourceHtml ? sanitizeText(tender.sourceHtml) : null,
         tender.budgetAmount ?? null,
         tender.deadlineTime ?? null,
         null
@@ -170,7 +177,7 @@ export async function upsertTender(
 export async function getAllTenders(): Promise<EnrichedTender[]> {
   const result = await pool.query(
     `SELECT
-       tn.url, tn.city, tn.title, tn.content_text,
+       tn.url, tn.city, tn.source_site, tn.title, tn.content_text,
        tn.source_html,
        tn.budget_amount, tn.deadline_time,
        ta.decision, ta.match_score,
@@ -190,6 +197,7 @@ export async function getAllTenders(): Promise<EnrichedTender[]> {
     return {
       url: row.url,
       city: row.city,
+      sourceSite: row.source_site,
       title: row.title,
       contentText: row.content_text ?? "",
       sourceHtml: row.source_html ?? undefined,
@@ -304,7 +312,7 @@ export async function loadRequirements(
       label: doc.label ?? "",
       sourcePageUrl: doc.source_page_url ?? t.url,
       contentType: doc.content_type ?? undefined,
-      status: doc.status as never,
+      status: doc.status as TenderAttachmentStatus,
       textContent: doc.text_content ?? undefined,
       error: doc.error ?? undefined
     }));

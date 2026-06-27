@@ -28,12 +28,18 @@ function classifyFetchError(error: unknown): CrawlErrorCode {
   return "NETWORK_RESTRICTED";
 }
 
+function paginateUrl(baseUrl: string, page: number): string {
+  if (page <= 1) return baseUrl;
+  const url = new URL(baseUrl);
+  url.searchParams.set("page", String(page));
+  return url.toString();
+}
+
 export class DirectFetchExecutor implements CrawlExecutor {
   readonly strategy = "backend_fetch" as const;
 
   collectList(source: CrawlSource, page: number): Promise<CollectedPage> {
-    void page;
-    return this.collect(source.url);
+    return this.collect(paginateUrl(source.url, page));
   }
 
   collectDetail(url: string): Promise<CollectedPage> {

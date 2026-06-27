@@ -42,6 +42,7 @@ export class LianyungangCrawler implements TenderCrawler {
 
     return {
       city: this.city,
+      sourceSite: item.sourceSite,
       url: item.detailUrl,
       title,
       sourceHtml: detail.sourceHtml,

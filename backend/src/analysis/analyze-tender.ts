@@ -296,7 +296,7 @@ function performanceMatchesRequirement(
 
 function extractRequiredLevel(requirement: string): string | undefined {
   const match = requirement.match(
-    /(Class\s*[1-4]|[一二三四特甲乙丙]级|不分等级|涓€绾?|浜岀骇|涓夌骇|鐗圭骇|鐢茬骇|涔欑骇|涓欑骇)/i
+    /(Class\s*[1-4]|[一二三四特甲乙丙]级|不分等级)/i
   );
   return match?.[1]?.replace(/\s+/g, " ");
 }

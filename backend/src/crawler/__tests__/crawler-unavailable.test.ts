@@ -7,13 +7,12 @@ import {
 } from "../types.js";
 import { CrawlerService } from "../service.js";
 import { HuaianCrawler } from "../sites/huaian.js";
-import { ZhenjiangCrawler, setKimiApiKey } from "../sites/zhenjiang.js";
+import { ZhenjiangCrawler } from "../sites/zhenjiang.js";
 import type { TenderNotice } from "../../domain/types.js";
 
 describe("external crawler availability", () => {
   afterEach(() => {
     vi.restoreAllMocks();
-    setKimiApiKey("");
   });
 
   it("marks known external crawler failures as skipped jobs", async () => {
@@ -51,39 +50,9 @@ describe("external crawler availability", () => {
   });
 
   it("reports Zhenjiang empty search index as a platform-side issue", async () => {
-    setKimiApiKey("test-key");
     const crawler = new ZhenjiangCrawler();
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
-
-      if (url.includes("/services/FrontAppActionForWS/getYZM")) {
-        return new Response(
-          JSON.stringify({
-            return: JSON.stringify([
-              { Value: "captcha-guid" },
-              { Value: "/captcha.jpg" }
-            ])
-          }),
-          { status: 200 }
-        );
-      }
-
-      if (url.includes("/captcha.jpg")) {
-        return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
-      }
-
-      if (url.includes("api.moonshot.cn")) {
-        return new Response(
-          JSON.stringify({
-            choices: [{ message: { content: "ABCD" } }]
-          }),
-          { status: 200 }
-        );
-      }
-
-      if (url.includes("/services/zjggzynew/checkyzm")) {
-        return new Response(JSON.stringify({ return: 1 }), { status: 200 });
-      }
 
       if (url.includes("/inteligentsearch/rest/inteligentSearch/getFullTextData")) {
         return new Response(

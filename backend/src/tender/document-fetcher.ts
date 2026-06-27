@@ -130,7 +130,8 @@ async function parsePdf(buffer: Buffer): Promise<string | null> {
     ) => Promise<{ text?: string }>;
     const result = await pdfParse(buffer);
     return result.text?.trim() || null;
-  } catch {
+  } catch (err) {
+    console.warn("PDF parse error:", String(err));
     return null;
   }
 }
@@ -142,7 +143,8 @@ async function parseWord(buffer: Buffer): Promise<string | null> {
     };
     const result = await mammoth.extractRawText({ buffer });
     return result.value?.trim() || null;
-  } catch {
+  } catch (err) {
+    console.warn("Word parse error:", String(err));
     return null;
   }
 }

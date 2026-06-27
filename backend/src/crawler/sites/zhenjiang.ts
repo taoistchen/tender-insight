@@ -11,31 +11,57 @@ import { CrawlerUnavailableError } from "../types.js";
 
 const BASE_URL = "http://ggzy.zhenjiang.gov.cn";
 const SEARCH_URL = `${BASE_URL}/inteligentsearch/rest/inteligentSearch/getFullTextData`;
-const CAPTCHA_URL = `${BASE_URL}/services/FrontAppActionForWS/getYZM`;
-const VERIFY_URL = `${BASE_URL}/services/zjggzynew/checkyzm`;
-const CATEGORY_TENDER_NOTICE = "001001002";
-const KIMI_MODEL = "moonshot-v1-32k-vision-preview";
+const DETAIL_PATH_URL = `${BASE_URL}/services/zjggzynew/getDetailPath`;
 
-let kimiApiKey = "";
+/**
+ * Category number for 招标公告 (tender notice / 工程建设).
+ * Matches all sub-categories via right-like prefix.
+ */
+const TENDER_CATEGORY_PRIMARY = "001001002";
 
-export function setKimiApiKey(key: string) {
-  kimiApiKey = key;
-}
+const PAGE_SIZE = 20;
 
 export class ZhenjiangCrawler implements TenderCrawler {
   readonly siteName = "镇江市公共资源交易平台";
   readonly city = "镇江";
 
   async fetchList(page = 1): Promise<CrawlPageResult> {
-    if (!kimiApiKey) {
-      throw new Error("Zhenjiang crawler requires KIMI_API_KEY");
-    }
+    const pn = (page - 1) * PAGE_SIZE;
 
-    const pageSize = 20;
-    const pn = (page - 1) * pageSize;
-    const { imgguid, captcha } = await this.#solveCaptcha();
-    const verifyOk = await this.#verifyCaptcha(imgguid, captcha);
-    if (!verifyOk) throw new Error("Zhenjiang captcha verification failed");
+    // Match the web page's param object structure exactly.
+    // condition uses the "招标公告" (tender notice) category.
+    const params = {
+      token: "",
+      pn,
+      rn: `${PAGE_SIZE}`,
+      sdt: "",
+      edt: "",
+      wd: "",
+      inc_wd: "",
+      exc_wd: "",
+      fields: "title",
+      cnum: "001",
+      sort: '{"infodatepx":"0"}',
+      ssort: "title",
+      cl: 200,
+      terminal: "",
+      condition: JSON.stringify([
+        {
+          fieldName: "categorynum",
+          isLike: true,
+          likeType: 2, // right-like (prefix match)
+          equal: TENDER_CATEGORY_PRIMARY
+        }
+      ]),
+      time: null,
+      highlights: "title",
+      statistics: null,
+      unionCondition: null,
+      accuracy: "",
+      noParticiple: "1",
+      searchRange: null,
+      isBusiness: "1"
+    };
 
     const response = await fetch(SEARCH_URL, {
       method: "POST",
@@ -46,21 +72,7 @@ export class ZhenjiangCrawler implements TenderCrawler {
           "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
         Referer: `${BASE_URL}/jyxx/tradeInfonew.html?type=gcjs`
       },
-      body: JSON.stringify({
-        condition: [
-          {
-            fieldName: "categorynum",
-            isLike: true,
-            likeType: 2,
-            equal: CATEGORY_TENDER_NOTICE
-          }
-        ],
-        unionCondition: null,
-        time: null,
-        wd: null,
-        pn,
-        rn: pageSize
-      })
+      body: JSON.stringify(params)
     });
 
     if (!response.ok) {
@@ -83,34 +95,47 @@ export class ZhenjiangCrawler implements TenderCrawler {
     }
 
     const items: TenderListItem[] = records.map((record) => {
+      // infoid is an array in the API response, take the first element
+      const infoid = Array.isArray(record.infoid)
+        ? record.infoid[0]
+        : (record.infoid ?? "");
       const publishDate = record.infodatepx?.substring(0, 10) ?? "";
       return {
-        sectionNo: record.infoid ?? "",
+        sectionNo: infoid,
         projectName: record.title ?? "",
         sectionName: "",
         budgetAmount: undefined,
         publishDate,
-        detailUrl: `${BASE_URL}/jyxx/001001/001001002/${publishDate.replace(
-          /-/g,
-          ""
-        )}/${record.infoid}.html`,
+        // Detail URL resolved lazily in fetchDetail via getDetailPath API
+        detailUrl: "",
         sourceSite: this.siteName
       };
     });
 
     return {
       items,
-      totalPages: Math.ceil(total / pageSize) || 1,
+      totalPages: Math.ceil(total / PAGE_SIZE) || 1,
       currentPage: page
     };
   }
 
   async fetchDetail(item: TenderListItem): Promise<TenderNotice> {
-    const html = await this.#fetchText(item.detailUrl);
+    // Resolve the actual detail page URL via the platform's API
+    const detailUrl = item.sectionNo
+      ? await this.#resolveDetailUrl(item.sectionNo)
+      : item.detailUrl;
+
+    if (!detailUrl) {
+      throw new Error(
+        `Cannot resolve detail URL for infoid: ${item.sectionNo}`
+      );
+    }
+
+    const html = await this.#fetchText(detailUrl);
     const title = this.#extractMeta(html, "ArticleTitle") ?? item.projectName;
     const pubDate = this.#extractMeta(html, "PubDate") ?? item.publishDate;
     const detail = await extractDeepTenderDetail({
-      entryUrl: item.detailUrl,
+      entryUrl: detailUrl,
       initialHtml: html,
       fetchText: (url) => this.#fetchText(url)
     });
@@ -120,10 +145,13 @@ export class ZhenjiangCrawler implements TenderCrawler {
       .filter((text): text is string => Boolean(text));
     const extractionText = [detail.contentText, ...documentTexts].join("\n\n");
     const fields = extractTenderFields(extractionText);
+    const deadlineStr =
+      this.#extractDeadline(html) ?? this.#extractDeadline(extractionText);
 
     return {
       city: this.city,
-      url: item.detailUrl,
+      sourceSite: item.sourceSite,
+      url: detailUrl,
       title,
       sourceHtml: detail.sourceHtml,
       resolvedLinks: detail.resolvedLinks,
@@ -134,79 +162,27 @@ export class ZhenjiangCrawler implements TenderCrawler {
         32_768
       ),
       budgetAmount: fields.budgetAmount ?? item.budgetAmount,
-      deadlineTime: fields.deadlineTime,
+      deadlineTime: deadlineStr ? parseDate(deadlineStr) : fields.deadlineTime,
       qualificationRequirements: fields.qualificationRequirements,
       personnelRequirements: fields.personnelRequirements,
       performanceRequirements: fields.performanceRequirements
     };
   }
 
-  async #solveCaptcha(): Promise<{ imgguid: string; captcha: string }> {
-    const metadataResponse = await fetch(
-      `${CAPTCHA_URL}?i=${Date.now()}&response=application/json`
-    );
-    const outer = JSON.parse(await metadataResponse.text()) as { return: string };
-    const inner = JSON.parse(outer.return.replace(/\\/g, "/")) as {
-      Value: string;
-    }[];
-    const imgguid = inner[0].Value;
-    const imgPath = inner[1].Value;
-
-    const imageResponse = await fetch(`${BASE_URL}${imgPath}`);
-    const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
-    const kimiResponse = await fetch("https://api.moonshot.cn/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${kimiApiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: KIMI_MODEL,
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "image_url",
-                image_url: {
-                  url: `data:image/jpeg;base64,${imageBuffer.toString("base64")}`
-                }
-              },
-              {
-                type: "text",
-                text: "Recognize the 4-character captcha. Return only the captcha."
-              }
-            ]
-          }
-        ],
-        max_tokens: 10
-      })
-    });
-
-    if (!kimiResponse.ok) {
-      throw new Error(`Kimi API returned HTTP ${kimiResponse.status}`);
-    }
-
-    const kimiJson = (await kimiResponse.json()) as {
-      choices: { message: { content: string } }[];
-    };
-    return {
-      imgguid,
-      captcha: kimiJson.choices[0].message.content
-        .trim()
-        .replace(/[^a-zA-Z0-9]/g, "")
-    };
-  }
-
-  async #verifyCaptcha(imgguid: string, captcha: string): Promise<boolean> {
-    const response = await fetch(
-      `${VERIFY_URL}?imgguid=${imgguid}&yzm=${captcha}&response=application/json`
-    );
+  /** Resolve the detail page path for a given infoId via the platform API. */
+  async #resolveDetailUrl(infoId: string): Promise<string | null> {
     try {
-      const data = JSON.parse(await response.text()) as { return: number | string };
-      return data.return === 1 || data.return === "1";
+      const response = await fetch(
+        `${DETAIL_PATH_URL}?infoId=${encodeURIComponent(infoId)}&response=application/json`
+      );
+      if (!response.ok) return null;
+      const data = (await response.json()) as { return?: string };
+      if (data.return) {
+        return `${BASE_URL}${data.return}`;
+      }
+      return null;
     } catch {
-      return false;
+      return null;
     }
   }
 
@@ -236,6 +212,13 @@ export class ZhenjiangCrawler implements TenderCrawler {
     );
     return match ? match[1].trim() : null;
   }
+
+  #extractDeadline(text: string): string | null {
+    const match = text.match(
+      /(?:投标|递交)(?:文件)?(?:截止|递交截止)时间\s*[:：]?\s*(\d{4}[-/年]\d{1,2}[-/月]\d{1,2}日?\s*\d{1,2}[:：]\d{1,2})/
+    );
+    return match ? match[1] : null;
+  }
 }
 
 function decodeBuffer(buffer: Buffer): string {
@@ -246,9 +229,20 @@ function decodeBuffer(buffer: Buffer): string {
   }
 }
 
+function parseDate(raw: string): Date | undefined {
+  const normalized = raw
+    .replace(/年/g, "-")
+    .replace(/月/g, "-")
+    .replace(/日/g, "")
+    .replace("：", ":")
+    .trim();
+  const parsed = new Date(normalized);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+}
+
 interface ZhenjiangRecord {
   title?: string;
-  infoid?: string;
+  infoid?: string | string[];
   infodatepx?: string;
   zhuanzai?: string;
 }

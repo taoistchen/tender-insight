@@ -5,7 +5,7 @@ import type { TenderAnalysisResult } from "../domain/types.js";
 import { extractTenderFields } from "../tender/extract-tender-fields.js";
 import { NanjingCrawler } from "./sites/nanjing.js";
 import { LianyungangCrawler } from "./sites/lianyungang.js";
-import { ZhenjiangCrawler, setKimiApiKey } from "./sites/zhenjiang.js";
+import { ZhenjiangCrawler } from "./sites/zhenjiang.js";
 import { HuaianCrawler } from "./sites/huaian.js";
 import { DirectFetchExecutor } from "./executors/direct-fetch-executor.js";
 import { RemoteBrowserExecutor } from "./executors/remote-browser-executor.js";
@@ -42,6 +42,7 @@ import type {
 /** A tender with its analysis result, as returned by the API. */
 export interface EnrichedTender {
   city: string;
+  sourceSite: string;
   url: string;
   title: string;
   contentText?: string;
@@ -74,9 +75,6 @@ class CrawlerService {
   private dbReady = false;
 
   constructor(crawlers?: TenderCrawler[], options: CrawlerServiceOptions = {}) {
-    const kimiKey = process.env["KIMI_API_KEY"] ?? "";
-    if (kimiKey) setKimiApiKey(kimiKey);
-
     this.crawlers =
       crawlers ?? [
         new NanjingCrawler(),
@@ -234,7 +232,7 @@ class CrawlerService {
       requestedMaxPages: maxPages
     });
 
-    const pagesToCrawl = Math.min(resolvedMaxPages, 1);
+    const pagesToCrawl = resolvedMaxPages;
 
     const job: CrawlJob = {
       id: `crawl-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -395,6 +393,7 @@ class CrawlerService {
 
     return {
       city,
+      sourceSite: item.sourceSite,
       url: item.detailUrl,
       title,
       sourceHtml: html,
@@ -473,13 +472,17 @@ function extractRecipeListItems(
       continue;
     }
 
+    const publishDate = source.selectors.publishDate
+      ? extractSelectorText(itemHtml, source.selectors.publishDate).trim()
+      : "";
+
     try {
       const detailUrl = new URL(href, source.url).toString();
       items.push({
         sectionNo: detailUrl,
         projectName: normalizedTitle,
         sectionName: "",
-        publishDate: "",
+        publishDate,
         detailUrl,
         sourceSite: source.name
       });
@@ -536,17 +539,47 @@ function findElementsBySimpleSelector(html: string, selector: string): string[] 
     }
 
     const tagName = match[1];
-    const closingTagRegex = new RegExp(`</${escapeRegExp(tagName)}>`, "i");
-    const remainingHtml = html.slice(openingTagRegex.lastIndex);
-    const closingMatch = remainingHtml.match(closingTagRegex);
-    if (!closingMatch || closingMatch.index === undefined) {
+    const openTagRe = new RegExp(`<(${escapeRegExp(tagName)})\\b[^>]*>`, "gi");
+    const closeTagRe = new RegExp(`</${escapeRegExp(tagName)}>`, "gi");
+
+    // Track depth to find matching closing tag for nested identical tags.
+    // Start both regexes right after the opening tag we just matched.
+    openTagRe.lastIndex = openingTagRegex.lastIndex;
+    closeTagRe.lastIndex = openingTagRegex.lastIndex;
+    let depth = 1;
+    let closeMatch: RegExpExecArray | null = null;
+
+    while (depth > 0) {
+      // Find next opening or closing tag, whichever comes first
+      const nextOpen = openTagRe.exec(html);
+      const nextClose = closeTagRe.exec(html);
+
+      if (!nextClose) {
+        // No more closing tags — malformed HTML
+        closeMatch = null;
+        break;
+      }
+
+      if (nextOpen && nextOpen.index < nextClose.index) {
+        depth++;
+      } else {
+        depth--;
+        if (depth === 0) {
+          closeMatch = nextClose;
+        }
+      }
+    }
+
+    if (!closeMatch || closeMatch.index === undefined) {
       continue;
     }
 
-    const endIndex =
-      openingTagRegex.lastIndex + closingMatch.index + closingMatch[0].length;
+    const endIndex = closeMatch.index + closeMatch[0].length;
     const elementHtml = html.slice(match.index, endIndex);
     elements.push(elementHtml);
+
+    // Advance openingTagRegex past the matched element to continue searching
+    openingTagRegex.lastIndex = endIndex;
   }
 
   return elements;
