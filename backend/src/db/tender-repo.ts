@@ -16,6 +16,7 @@ interface TenderRow {
   source_html: string | null;
   budget_amount: string | null;
   deadline_time: string | null;
+  publish_date: string | null;
   decision: string;
   match_score: number;
   matched_points: unknown;
@@ -56,7 +57,8 @@ export async function upsertTender(
          content_text = EXCLUDED.content_text,
          source_html = EXCLUDED.source_html,
          budget_amount = EXCLUDED.budget_amount,
-         deadline_time = EXCLUDED.deadline_time
+         deadline_time = EXCLUDED.deadline_time,
+         publish_date = EXCLUDED.publish_date
        RETURNING id, (xmax = 0) AS is_new`,
       [
         tender.url,
@@ -67,7 +69,7 @@ export async function upsertTender(
         tender.sourceHtml ? sanitizeText(tender.sourceHtml) : null,
         tender.budgetAmount ?? null,
         tender.deadlineTime ?? null,
-        null
+        tender.publishDate ?? null
       ]
     );
 
@@ -179,13 +181,13 @@ export async function getAllTenders(): Promise<EnrichedTender[]> {
     `SELECT
        tn.url, tn.city, tn.source_site, tn.title, tn.content_text,
        tn.source_html,
-       tn.budget_amount, tn.deadline_time,
+       tn.budget_amount, tn.deadline_time, tn.publish_date,
        ta.decision, ta.match_score,
        ta.matched_points, ta.risk_points,
        ta.manual_review_required
      FROM tender_notice tn
      JOIN tender_analysis ta ON ta.tender_id = tn.id
-     ORDER BY tn.deadline_time DESC NULLS LAST`
+     ORDER BY ta.match_score DESC NULLS LAST, tn.deadline_time DESC NULLS LAST`
   );
 
   const rows = result.rows as TenderRow[];
@@ -207,6 +209,7 @@ export async function getAllTenders(): Promise<EnrichedTender[]> {
       deadlineTime: row.deadline_time
         ? new Date(row.deadline_time)
         : undefined,
+      publishDate: row.publish_date ?? undefined,
       qualificationRequirements: qualifications,
       personnelRequirements: personnel,
       performanceRequirements: performance,
@@ -325,4 +328,21 @@ export async function loadRequirements(
 export async function getTenderCount(): Promise<number> {
   const result = await pool.query("SELECT COUNT(*)::int AS cnt FROM tender_notice");
   return result.rows[0].cnt as number;
+}
+
+/**
+ * Check if a tender URL is already fully parsed in the database.
+ * Returns true if the tender exists with budget, deadline, and publish_date.
+ */
+export async function isTenderFullyParsed(url: string): Promise<boolean> {
+  const result = await pool.query(
+    `SELECT 1 FROM tender_notice
+     WHERE url = $1
+       AND budget_amount IS NOT NULL
+       AND deadline_time IS NOT NULL
+       AND publish_date IS NOT NULL
+     LIMIT 1`,
+    [url]
+  );
+  return (result.rowCount ?? 0) > 0;
 }

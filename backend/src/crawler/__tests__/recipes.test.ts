@@ -7,14 +7,13 @@ import {
 } from "../recipes.js";
 
 describe("crawler recipes", () => {
-  it("exposes the Huaian construction source with remote browser fallback", () => {
+  it("exposes the Huaian construction source with backend_fetch strategy", () => {
     const recipe = getCrawlerRecipe("huaian");
 
     expect(recipe.siteKey).toBe("huaian");
     expect(recipe.sources[0].key).toBe("construction");
     expect(recipe.sources[0].strategies).toEqual([
-      "backend_fetch",
-      "remote_browser"
+      "backend_fetch"
     ]);
   });
 

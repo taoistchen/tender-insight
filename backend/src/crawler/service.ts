@@ -1,8 +1,50 @@
-import { analyzeTender } from "../analysis/analyze-tender.js";
+import { analyzeTender, analyzeTenderWithAI } from "../analysis/analyze-tender.js";
 import { seedCompanyProfile } from "../seed/company-profile.js";
 import type { TenderNotice } from "../domain/types.js";
 import type { TenderAnalysisResult } from "../domain/types.js";
-import { extractTenderFields } from "../tender/extract-tender-fields.js";
+import { extractTenderFields, enrichTenderWithAI } from "../tender/extract-tender-fields.js";
+
+/* ── Concurrency limiter (semaphore) ── */
+
+class ConcurrencyLimiter {
+  private running = 0;
+  private readonly queue: (() => void)[] = [];
+
+  constructor(private readonly max: number) {}
+
+  async acquire(): Promise<void> {
+    if (this.running < this.max) {
+      this.running++;
+      return;
+    }
+    return new Promise((resolve) => {
+      this.queue.push(resolve);
+    });
+  }
+
+  release(): void {
+    this.running--;
+    const next = this.queue.shift();
+    if (next) {
+      this.running++;
+      next();
+    }
+  }
+
+  async run<T>(fn: () => Promise<T>): Promise<T> {
+    await this.acquire();
+    try {
+      return await fn();
+    } finally {
+      this.release();
+    }
+  }
+}
+
+const CRAWL_CONCURRENCY = Math.max(
+  1,
+  Math.min(10, Number(process.env["CRAWL_CONCURRENCY"]) || 5)
+);
 import { NanjingCrawler } from "./sites/nanjing.js";
 import { LianyungangCrawler } from "./sites/lianyungang.js";
 import { ZhenjiangCrawler } from "./sites/zhenjiang.js";
@@ -28,7 +70,8 @@ import {
   upsertTender,
   getAllTenders as dbGetAllTenders,
   loadRequirements,
-  getTenderCount
+  getTenderCount,
+  isTenderFullyParsed
 } from "../db/tender-repo.js";
 import { CrawlerUnavailableError } from "./types.js";
 import type {
@@ -48,6 +91,7 @@ export interface EnrichedTender {
   contentText?: string;
   budgetAmount?: number;
   deadlineTime?: Date;
+  publishDate?: string;
   qualificationRequirements: { name: string; level: string }[];
   personnelRequirements?: string[];
   performanceRequirements?: string[];
@@ -166,36 +210,44 @@ class CrawlerService {
 
     try {
       const companyProfile = await this.getCompanyProfile();
+      const limiter = new ConcurrencyLimiter(CRAWL_CONCURRENCY);
+
       for (let page = 1; page <= maxPages; page++) {
         const result = await crawler.fetchList(page);
         job.pagesTotal = Math.min(result.totalPages, maxPages);
         job.pagesCrawled = page;
 
-        for (const item of result.items) {
-          job.tendersFound++;
+        await Promise.all(
+          result.items.map((item) =>
+            limiter.run(async () => {
+              job.tendersFound++;
 
-          try {
-            const tender = await crawler.fetchDetail(item);
-            const analysis = analyzeTender(tender, companyProfile);
-            const enriched: EnrichedTender = { ...tender, analysis };
-
-            // Persist to PostgreSQL (upsert dedup by URL)
-            if (this.dbReady) {
-              const { saved, isNew } = await upsertTender(enriched);
-              if (saved && isNew) job.tendersNew++;
-            } else {
-              // In-memory fallback
-              if (!this.tenders.has(tender.url)) {
-                this.tenders.set(tender.url, enriched);
-                job.tendersNew++;
+              // Skip if already fully parsed
+              if (this.dbReady && await isTenderFullyParsed(item.detailUrl)) {
+                return;
               }
-            }
-          } catch (err) {
-            console.warn(
-              `Failed to fetch detail for ${item.detailUrl}: ${String(err)}`
-            );
-          }
-        }
+
+              try {
+                const tender = await crawler.fetchDetail(item);
+                await enrichTenderWithAI(tender);
+                const analysis = await analyzeTenderWithAI(tender, companyProfile);
+                const enriched: EnrichedTender = { ...tender, analysis };
+
+                if (this.dbReady) {
+                  const { saved, isNew } = await upsertTender(enriched);
+                  if (saved && isNew) job.tendersNew++;
+                } else if (!this.tenders.has(tender.url)) {
+                  this.tenders.set(tender.url, enriched);
+                  job.tendersNew++;
+                }
+              } catch (err) {
+                console.warn(
+                  `Failed to fetch detail for ${item.detailUrl}: ${String(err)}`
+                );
+              }
+            })
+          )
+        );
       }
 
       job.status = "completed";
@@ -251,42 +303,52 @@ class CrawlerService {
 
     try {
       const companyProfile = await this.getCompanyProfile();
+      const limiter = new ConcurrencyLimiter(CRAWL_CONCURRENCY);
 
       for (let page = 1; page <= pagesToCrawl; page++) {
         const collectedList = await this.collectWithFallback(source, page, job);
         job.pagesCrawled = page;
 
         const items = extractRecipeListItems(collectedList.html, source);
-        for (const item of items) {
-          job.tendersFound++;
+        await Promise.all(
+          items.map((item) =>
+            limiter.run(async () => {
+              job.tendersFound++;
 
-          try {
-            const collectedDetail = await this.collectDetailWithFallback(
-              item.detailUrl,
-              source,
-              job
-            );
-            const tender = this.buildTenderFromCollected(
-              recipe.city,
-              item,
-              collectedDetail.html
-            );
-            const analysis = analyzeTender(tender, companyProfile);
-            const enriched: EnrichedTender = { ...tender, analysis };
+              if (this.dbReady && await isTenderFullyParsed(item.detailUrl)) {
+                return;
+              }
 
-            if (this.dbReady) {
-              const { saved, isNew } = await upsertTender(enriched);
-              if (saved && isNew) job.tendersNew++;
-            } else if (!this.tenders.has(tender.url)) {
-              this.tenders.set(tender.url, enriched);
-              job.tendersNew++;
-            }
-          } catch (err) {
-            console.warn(
-              `Failed to fetch recipe detail for ${item.detailUrl}: ${String(err)}`
-            );
-          }
-        }
+              try {
+                const collectedDetail = await this.collectDetailWithFallback(
+                  item.detailUrl,
+                  source,
+                  job
+                );
+                const tender = this.buildTenderFromCollected(
+                  recipe.city,
+                  item,
+                  collectedDetail.html
+                );
+                await enrichTenderWithAI(tender);
+                const analysis = await analyzeTenderWithAI(tender, companyProfile);
+                const enriched: EnrichedTender = { ...tender, analysis };
+
+                if (this.dbReady) {
+                  const { saved, isNew } = await upsertTender(enriched);
+                  if (saved && isNew) job.tendersNew++;
+                } else if (!this.tenders.has(tender.url)) {
+                  this.tenders.set(tender.url, enriched);
+                  job.tendersNew++;
+                }
+              } catch (err) {
+                console.warn(
+                  `Failed to fetch recipe detail for ${item.detailUrl}: ${String(err)}`
+                );
+              }
+            })
+          )
+        );
       }
 
       job.status = "completed";
@@ -400,6 +462,7 @@ class CrawlerService {
       contentText,
       budgetAmount: fields.budgetAmount ?? item.budgetAmount,
       deadlineTime: fields.deadlineTime,
+      publishDate: item.publishDate || undefined,
       qualificationRequirements: fields.qualificationRequirements,
       personnelRequirements: fields.personnelRequirements,
       performanceRequirements: fields.performanceRequirements
@@ -441,15 +504,101 @@ class CrawlerService {
     }
   }
 
+  /**
+   * Process pages fetched by the user's browser (via Service Worker).
+   *
+   * Phase "list": parses list HTML with recipe selectors, returns detail URLs.
+   * Phase "detail": parses detail HTML, runs analysis, persists to DB.
+   */
+  async ingestBrowserPages({
+    siteKey,
+    sourceKey,
+    phase,
+    pages
+  }: {
+    siteKey: string;
+    sourceKey: string;
+    phase: "list" | "detail";
+    pages: { url: string; html: string }[];
+  }): Promise<{ ok: boolean; detailUrls?: string[]; processed?: number; error?: string }> {
+    try {
+      const { source } = resolveRecipeSource({
+        siteKey,
+        sourceKey,
+        requestedMaxPages: 1
+      });
+
+      if (phase === "list") {
+        const detailUrls: string[] = [];
+        for (const page of pages) {
+          const items = extractRecipeListItems(page.html, source);
+          for (const item of items) {
+            if (item.detailUrl) {
+              detailUrls.push(item.detailUrl);
+            }
+          }
+        }
+        return { ok: true, detailUrls };
+      }
+
+      // Phase "detail": build tenders from HTML and persist
+      const companyProfile = await this.getCompanyProfile();
+      let processed = 0;
+
+      for (const page of pages) {
+        try {
+          const listItems = extractRecipeListItems(page.html, source);
+          const item = listItems[0];
+          if (!item) continue;
+
+          const tender = this.buildTenderFromCollected(
+            recipeCity(siteKey),
+            item,
+            page.html
+          );
+
+          await enrichTenderWithAI(tender);
+          const analysis = await analyzeTenderWithAI(tender, companyProfile);
+          const enriched: EnrichedTender = { ...tender, analysis };
+
+          if (this.dbReady) {
+            const { saved, isNew } = await upsertTender(enriched);
+            if (saved) processed++;
+          } else {
+            if (!this.tenders.has(tender.url)) {
+              this.tenders.set(tender.url, enriched);
+              processed++;
+            }
+          }
+        } catch (err) {
+          console.warn(
+            `Browser ingest: detail parse failed for ${page.url}: ${String(err)}`
+          );
+        }
+      }
+
+      return { ok: true, processed };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  }
+
   get count(): number {
     return this.tenders.size;
   }
 }
 
+function recipeCity(siteKey: string): string {
+  const cities: Record<string, string> = {
+    huaian: "淮安"
+  };
+  return cities[siteKey] ?? siteKey;
+}
+
 export const crawlerService = new CrawlerService();
 export { CrawlerService };
 
-function extractRecipeListItems(
+export function extractRecipeListItems(
   html: string,
   source: CrawlSource
 ): TenderListItem[] {

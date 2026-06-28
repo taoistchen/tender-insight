@@ -54,6 +54,7 @@ export class NanjingCrawler implements TenderCrawler {
         32_768
       ),
       budgetAmount: fields.budgetAmount ?? item.budgetAmount,
+      publishDate: pubDate || undefined,
       deadlineTime: deadlineStr ? parseDate(deadlineStr) : fields.deadlineTime,
       qualificationRequirements: fields.qualificationRequirements,
       personnelRequirements: fields.personnelRequirements,

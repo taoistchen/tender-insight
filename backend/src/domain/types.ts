@@ -81,6 +81,7 @@ export interface TenderNotice {
   documentTexts?: string[];
   budgetAmount?: number;
   deadlineTime?: Date;
+  publishDate?: string;
   qualificationRequirements: QualificationRequirement[];
   /** Raw personnel requirement strings extracted from tender text. */
   personnelRequirements?: string[];

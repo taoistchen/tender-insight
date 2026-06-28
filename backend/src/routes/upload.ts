@@ -2,6 +2,7 @@ import type { Request } from "express";
 import { Router } from "express";
 import multer from "multer";
 import { addQualification } from "../db/company-repo.js";
+import { AI_MODEL, AI_BASE_URL, getAiApiKey } from "../ai/config.js";
 
 export const uploadRouter = Router();
 
@@ -9,11 +10,6 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024, files: 10 }
 });
-
-const AI_MODEL = process.env["AI_MODEL"] ?? "deepseek-chat";
-const AI_BASE_URL =
-  process.env["AI_BASE_URL"] ?? "https://api.deepseek.com/v1/chat/completions";
-const AI_API_KEY = process.env["AI_API_KEY"] ?? "";
 
 interface ExtractedQual {
   name: string;
@@ -41,10 +37,10 @@ uploadRouter.post(
       return res.status(400).json({ error: "请选择文件" });
     }
 
-    const aiKey = AI_API_KEY || (process.env["KIMI_API_KEY"] ?? "");
+    const aiKey = getAiApiKey();
     if (!aiKey) {
       return res.status(400).json({
-        error: "未配置 AI_API_KEY 或 KIMI_API_KEY 环境变量，无法使用 AI 识别"
+        error: "未配置 AI_API_KEY 或 DEEPSEEK_API_KEY 环境变量，无法使用 AI 识别"
       });
     }
 

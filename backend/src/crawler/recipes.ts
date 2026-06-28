@@ -63,16 +63,16 @@ export type SiteRecipe = z.infer<typeof siteRecipeSchema>;
 const recipeDefinitions = [
   {
     siteKey: "huaian",
-    siteName: "Huai'an Public Resources Trading Center",
-    city: "Huaian",
+    siteName: "淮安市公共资源交易平台",
+    city: "淮安",
     enabled: true,
     sources: [
       {
         key: "construction",
-        name: "Construction Projects",
+        name: "建设工程",
         url: "https://ggzy.huaian.gov.cn/",
         maxPages: 5,
-        strategies: ["backend_fetch", "remote_browser"],
+        strategies: ["backend_fetch"],
         actions: [
           { type: "goto", urlFrom: "source.url" },
           { type: "waitForSelector", selector: "body" },

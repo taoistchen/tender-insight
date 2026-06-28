@@ -1,4 +1,5 @@
-import type { QualificationRequirement } from "../domain/types.js";
+import type { QualificationRequirement, TenderNotice } from "../domain/types.js";
+import { extractTenderFromPage, escapeNonHtml } from "../analysis/ai-extract.js";
 
 export interface ExtractedTenderFields {
   budgetAmount?: number;
@@ -151,4 +152,136 @@ function extractPerformanceRequirements(text: string): string[] {
   }
 
   return requirements;
+}
+
+/**
+ * PRIMARY extraction: uses DeepSeek AI to parse all tender fields.
+ *
+ * Strategy:
+ * 1. Extract from page HTML (fast, covers most cases)
+ * 2. If key fields missing, also parse attachment texts (PDFs/DOCXs)
+ * 3. Fall back to regex only if AI is unavailable
+ *
+ * Mutates tender in place. Safe to call without AI key (uses regex only).
+ */
+export async function enrichTenderWithAI(
+  tender: TenderNotice
+): Promise<void> {
+  // Build the full text corpus: page HTML + attachment texts
+  const html = tender.sourceHtml;
+  const attachmentTexts = (tender.documentTexts ?? []).filter(
+    (t) => t && t.trim().length > 20
+  );
+
+  // Phase 1: AI on page HTML
+  if (html && html.length >= 100) {
+    const aiFields = await extractTenderFromPage(html);
+
+    if (aiFields) {
+      applyAiFields(tender, aiFields);
+
+      // If budget still missing but we have attachment texts, try again
+      if (!tender.budgetAmount && attachmentTexts.length > 0) {
+        const escapedAttach = attachmentTexts
+          .map((t) => escapeNonHtml(t))
+          .join("\n---\n")
+          .slice(0, 8000);
+        // Put attachment text first so it's within the preprocessing window
+        const combinedHtml = "<html><body>" + escapedAttach + "\n\n===页面内容===\n" + html + "</body></html>";
+        const aiAttach = await extractTenderFromPage(combinedHtml);
+        if (aiAttach) {
+          applyAiFields(tender, aiAttach);
+        }
+      }
+      return;
+    }
+  }
+
+  // Phase 2: AI on attachment texts only (no page HTML)
+  if (attachmentTexts.length > 0) {
+    const escaped = attachmentTexts
+      .map((t) => escapeNonHtml(t))
+      .join("\n---\n")
+      .slice(0, 12000);
+    const aiFields = await extractTenderFromPage(
+      `<html><body>${escaped}</body></html>`
+    );
+    if (aiFields) {
+      applyAiFields(tender, aiFields);
+      return;
+    }
+  }
+
+  // Phase 3: AI unavailable — regex fallback
+  const text = [tender.title, tender.contentText, ...attachmentTexts].join("\n");
+  const regexFields = extractTenderFields(text);
+  if (!tender.budgetAmount && regexFields.budgetAmount) {
+    tender.budgetAmount = regexFields.budgetAmount;
+  }
+  if (!tender.deadlineTime && regexFields.deadlineTime) {
+    tender.deadlineTime = regexFields.deadlineTime;
+  }
+  if (
+    regexFields.qualificationRequirements.length > 0 &&
+    tender.qualificationRequirements.length === 0
+  ) {
+    tender.qualificationRequirements = regexFields.qualificationRequirements;
+  }
+  if (
+    regexFields.personnelRequirements.length > 0 &&
+    !tender.personnelRequirements?.length
+  ) {
+    tender.personnelRequirements = regexFields.personnelRequirements;
+  }
+  if (
+    regexFields.performanceRequirements.length > 0 &&
+    !tender.performanceRequirements?.length
+  ) {
+    tender.performanceRequirements = regexFields.performanceRequirements;
+  }
+}
+
+/** Apply AI-extracted fields to tender (only fills in missing values). */
+function applyAiFields(
+  tender: TenderNotice,
+  fields: import("../analysis/ai-extract.js").AiExtractedFields
+): void {
+  if (fields.budgetAmount && fields.budgetAmount > 0) {
+    tender.budgetAmount = fields.budgetAmount;
+  }
+  if (fields.publishDate && !tender.publishDate) {
+    tender.publishDate = fields.publishDate;
+  }
+  if (fields.deadlineTime) {
+    const parsed = new Date(fields.deadlineTime);
+    if (!Number.isNaN(parsed.getTime()) && !tender.deadlineTime) {
+      tender.deadlineTime = parsed;
+    }
+  }
+  if (fields.qualificationRequirements.length > 0) {
+    const existing = new Set(tender.qualificationRequirements.map((q) => q.name));
+    for (const q of fields.qualificationRequirements) {
+      if (!existing.has(q.name)) {
+        tender.qualificationRequirements.push(q);
+      }
+    }
+  }
+  if (fields.personnelRequirements.length > 0) {
+    const existing = new Set(tender.personnelRequirements ?? []);
+    for (const p of fields.personnelRequirements) {
+      if (!existing.has(p)) {
+        if (!tender.personnelRequirements) tender.personnelRequirements = [];
+        tender.personnelRequirements.push(p);
+      }
+    }
+  }
+  if (fields.performanceRequirements.length > 0) {
+    const existing = new Set(tender.performanceRequirements ?? []);
+    for (const p of fields.performanceRequirements) {
+      if (!existing.has(p)) {
+        if (!tender.performanceRequirements) tender.performanceRequirements = [];
+        tender.performanceRequirements.push(p);
+      }
+    }
+  }
 }

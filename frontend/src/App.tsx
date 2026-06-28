@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo, useRef, useCallback } from "react";
+import { registerSw, autoCrawl } from "./browser-crawler.js";
 
 /* ─── Types ─── */
 
@@ -7,7 +8,7 @@ type Decision =
 
 interface ApiTender {
   city: string; url: string; title: string;
-  budgetAmount: number | null; deadlineTime: string;
+  budgetAmount: number | null; deadlineTime: string; publishDate?: string;
   qualificationRequirements: { name: string; level: string }[];
   personnelRequirements: string[]; performanceRequirements: string[];
   analysis: { decision: Decision; matchScore: number; matchedPoints: string[]; riskPoints: string[]; manualReviewRequired: boolean; };
@@ -33,6 +34,7 @@ interface CrawlRecipe {
   sources: {
     key: string;
     name: string;
+    url: string;
     maxPages: number;
     strategies: string[];
   }[];
@@ -73,7 +75,7 @@ const DECISION_SORT: Record<Decision, number> = { recommended: 0, watch: 1, manu
 
 const API = "/api"; const PAGE_SIZE = 10;
 type LoadingState = "idle" | "loading" | "error" | "ready";
-type SortKey = "decision" | "score" | "deadline" | "amount";
+type SortKey = "decision" | "score" | "deadline" | "amount" | "publish";
 type AdminTab = "qualifications" | "personnel" | "performances" | "preferences";
 type Mode = "dashboard" | "crawler" | "admin";
 
@@ -279,6 +281,8 @@ export function App() {
 
   // Dashboard state
   const [tenders, setTenders] = useState<ApiTender[]>([]);
+  const [tenderTotal, setTenderTotal] = useState(0);
+  const [stats, setStats] = useState({ total: 0, active: 0, recommended: 0, watch: 0, manualReview: 0, rejected: 0, expiringSoon: 0 });
   const [company, setCompany] = useState<CompanyProfile | null>(null);
   const [tenderState, setTenderState] = useState<LoadingState>("idle");
   const [companyState, setCompanyState] = useState<LoadingState>("idle");
@@ -331,10 +335,17 @@ export function App() {
 
   /* ─── Fetch ─── */
 
-  async function fetchTenders() {
+  async function fetchTenders(apiPage = 1) {
     setTenderState("loading");
-    try { const r = await fetch(`${API}/tenders`); if (!r.ok) throw new Error(""); setTenders(await r.json()); setTenderState("ready"); }
-    catch { setTenderState("error"); }
+    try {
+      const r = await fetch(`${API}/tenders?page=${apiPage}&limit=${PAGE_SIZE}`);
+      if (!r.ok) throw new Error("");
+      const data = await r.json();
+      setTenders(data.items ?? data); // backward compat with old API
+      setTenderTotal(data.total ?? data.length);
+      setPage(apiPage);
+      setTenderState("ready");
+    } catch { setTenderState("error"); }
   }
   async function fetchCompany() {
     setCompanyState("loading");
@@ -409,7 +420,32 @@ export function App() {
     }
   }
 
-  useEffect(() => { fetchTenders(); fetchCompany(); }, []);
+  useEffect(() => { fetchTenders(1); fetchCompany(); fetchCrawlerData(); fetchStats(); }, []);
+
+  async function fetchStats() {
+    try {
+      const r = await fetch(`${API}/tenders/stats`);
+      if (r.ok) setStats(await r.json());
+    } catch { /* ignore */ }
+  }
+
+  // Register Service Worker for browser-side crawling
+  useEffect(() => {
+    registerSw();
+  }, []);
+
+  // Auto-crawl restricted recipes when data is loaded
+  useEffect(() => {
+    if (recipes.length > 0 && tenderState === "ready") {
+      // Delay to let the page render first, then start background crawl
+      const timer = setTimeout(() => {
+        autoCrawl(recipes).catch((err) =>
+          console.warn("Auto-crawl failed:", err)
+        );
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [recipes, tenderState]);
   useEffect(() => { if (mode === "admin") fetchAdmin(); }, [mode]);
   useEffect(() => { if (mode === "crawler") fetchCrawlerData(); }, [mode]);
   useEffect(() => {
@@ -454,27 +490,27 @@ export function App() {
         case "score": return b.analysis.matchScore - a.analysis.matchScore;
         case "deadline": return (a.deadlineTime ? new Date(a.deadlineTime).getTime() : 0) - (b.deadlineTime ? new Date(b.deadlineTime).getTime() : 0);
         case "amount": return (b.budgetAmount ?? 0) - (a.budgetAmount ?? 0);
+        case "publish": return (b.publishDate ?? "").localeCompare(a.publishDate ?? "");
         default: return 0;
       }
     });
     return s;
   }, [tenders, sortBy]);
 
-  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(tenderTotal / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
-  const paged = sorted.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
   const selectedRecipe = recipes.find(recipe => recipe.siteKey === selectedSiteKey);
   const selectedSource = selectedRecipe?.sources.find(source => source.key === selectedSourceKey);
 
   const metrics = useMemo(() => {
-    const now = Date.now(); const soon = now + 3 * 86400000;
     return [
-      { label: "公告总数", value: tenders.length },
-      { label: "推荐参与", value: tenders.filter(t => t.analysis.decision === "recommended").length },
-      { label: "需人工确认", value: tenders.filter(t => t.analysis.decision === "manual_review").length },
-      { label: "即将截止", value: tenders.filter(t => { if (!t.deadlineTime) return false; const d = new Date(t.deadlineTime).getTime(); return d > now && d <= soon; }).length },
+      { label: "公告总数", value: stats.active },
+      { label: "推荐参与", value: stats.recommended },
+      { label: "可关注", value: stats.watch },
+      { label: "需人工确认", value: stats.manualReview },
+      { label: "即将截止", value: stats.expiringSoon },
     ];
-  }, [tenders]);
+  }, [stats]);
 
   function handleSort(key: SortKey) { setSortBy(key); setPage(1); }
 
@@ -502,10 +538,32 @@ export function App() {
             <article className="panel">
               <div className="panel-header">
                 <div><p className="panel-eyebrow">多城市 · 建设工程</p><h2>招标公告初筛</h2></div>
-                <button className="btn btn-primary" onClick={fetchTenders} disabled={tenderState === "loading"}>刷新</button>
+                <button
+                  className="btn btn-primary"
+                  onClick={async () => {
+                    setTenderState("loading");
+                    try {
+                      // Trigger crawls for all 3 active sites
+                      const sites = ["南京市公共资源交易平台", "连云港市公共资源交易平台", "镇江市公共资源交易平台"];
+                      for (const site of sites) {
+                        await fetch(`${API}/crawler/run`, {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ siteName: site, maxPages: 1 })
+                        });
+                      }
+                    } catch (err) {
+                      console.error("Crawl trigger failed:", err);
+                    }
+                    await fetchTenders(1);
+                  }}
+                  disabled={tenderState === "loading"}
+                >
+                  {tenderState === "loading" ? "拉取中..." : "拉取最新数据"}
+                </button>
               </div>
               {tenderState === "loading" && tenders.length === 0 && <Spinner />}
-              {tenderState === "error" && tenders.length === 0 && <ErrorState message="加载失败" onRetry={fetchTenders} />}
+              {tenderState === "error" && tenders.length === 0 && <ErrorState message="加载失败" onRetry={() => fetchTenders()} />}
               {tenderState === "ready" && tenders.length === 0 && <div className="empty-state-full"><p>暂无招标公告</p></div>}
               {tenders.length > 0 && (
                 <>
@@ -514,12 +572,13 @@ export function App() {
                       <thead><tr>
                         <th>项目名称</th><th>城市</th>
                         <th className="sortable" onClick={() => handleSort("amount")}>金额{sortBy === "amount" ? " ▾" : ""}</th>
+                        <th className="sortable" onClick={() => handleSort("publish")}>开始时间{sortBy === "publish" ? " ▾" : ""}</th>
                         <th className="sortable" onClick={() => handleSort("deadline")}>截止时间{sortBy === "deadline" ? " ▾" : ""}</th>
                         <th className="sortable" onClick={() => handleSort("score")}>匹配分{sortBy === "score" ? " ▾" : ""}</th>
                         <th className="sortable" onClick={() => handleSort("decision")}>判断{sortBy === "decision" ? " ▾" : ""}</th>
                       </tr></thead>
                       <tbody>
-                        {paged.map(t => (
+                        {sorted.map(t => (
                           <tr key={t.url}>
                             <td className="col-title">
                               {t.analysis.riskPoints.length > 0 && <span className="risk-dot" />}
@@ -527,6 +586,7 @@ export function App() {
                             </td>
                             <td>{t.city}</td>
                             <td className="col-num">{formatAmount(t.budgetAmount)}</td>
+                            <td className="col-date">{t.publishDate ? t.publishDate.slice(0, 10) : "-"}</td>
                             <td className="col-date">{formatDeadline(t.deadlineTime)}</td>
                             <td className={`col-num score ${scoreClass(t.analysis.matchScore)}`}>{t.analysis.matchScore}</td>
                             <td style={{ textAlign: "center" }}><DecisionBadge decision={t.analysis.decision} /></td>
@@ -538,10 +598,10 @@ export function App() {
                   <div className="pagination">
                     <span className="pagination-info">共 {sorted.length} 条，第 {safePage}/{totalPages} 页</span>
                     <div className="pagination-btns">
-                      <button className="btn" disabled={safePage <= 1} onClick={() => setPage(1)}>首页</button>
-                      <button className="btn" disabled={safePage <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}>上一页</button>
-                      <button className="btn" disabled={safePage >= totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}>下一页</button>
-                      <button className="btn" disabled={safePage >= totalPages} onClick={() => setPage(totalPages)}>末页</button>
+                      <button className="btn" disabled={safePage <= 1} onClick={() => fetchTenders(1)}>首页</button>
+                      <button className="btn" disabled={safePage <= 1} onClick={() => fetchTenders(safePage - 1)}>上一页</button>
+                      <button className="btn" disabled={safePage >= totalPages} onClick={() => fetchTenders(safePage + 1)}>下一页</button>
+                      <button className="btn" disabled={safePage >= totalPages} onClick={() => fetchTenders(totalPages)}>末页</button>
                     </div>
                   </div>
                 </>
@@ -611,15 +671,116 @@ export function App() {
               />
             </label>
             <button className="btn btn-primary" onClick={startRecipeCrawl} disabled={crawlLoading || !selectedSource}>
-              {crawlLoading ? "启动中..." : "开始采集"}
+              {crawlLoading ? "启动中..." : "后端采集"}
+            </button>
+            <button
+              className="btn"
+              style={{ background: "#1890ff", color: "#fff", marginLeft: 8 }}
+              onClick={async () => {
+                setCrawlLoading(true);
+                setCrawlError(null);
+                try {
+                  const { autoCrawl } = await import("./browser-crawler.js");
+                  await autoCrawl([selectedRecipe!]);
+                  await fetchCrawlerData();
+                  await fetchTenders();
+                } catch (err) {
+                  setCrawlError(err instanceof Error ? err.message : "浏览器采集失败");
+                } finally {
+                  setCrawlLoading(false);
+                }
+              }}
+              disabled={crawlLoading || !selectedRecipe}
+            >
+              {crawlLoading ? "启动中..." : "浏览器采集"}
             </button>
           </div>
+          {/* Manual HTML paste for restricted sites */}
+          <details style={{ marginTop: 12 }}>
+            <summary style={{ cursor: "pointer", color: "#666", fontSize: 13 }}>
+              📋 手动粘贴HTML（淮安等受限站点）
+            </summary>
+            <div style={{ fontSize: 12, color: "#888", marginTop: 6 }}>
+              步骤：① 打开招标列表页 → 右键查看源代码 → 粘贴下面 → 点「解析列表」
+              <br />
+              ② 逐个打开详情页 → 查看源代码 → 粘贴 → 点「添加详情」
+            </div>
+            <textarea
+              id="manual-html"
+              rows={6}
+              placeholder="粘贴招标列表页或详情页的网页源代码..."
+              style={{ width: "100%", marginTop: 8, fontFamily: "monospace", fontSize: 12 }}
+            />
+            <div style={{ marginTop: 6, display: "flex", gap: 8 }}>
+              <button
+                className="btn"
+                style={{ background: "#52c41a", color: "#fff" }}
+                onClick={async () => {
+                  const html = (document.getElementById("manual-html") as HTMLTextAreaElement)?.value;
+                  if (!html || !selectedRecipe || !selectedSource) return;
+                  setCrawlLoading(true);
+                  setCrawlError(null);
+                  try {
+                    const resp = await fetch(`${API}/crawler/browser-ingest`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        siteKey: selectedRecipe.siteKey,
+                        sourceKey: selectedSource.key,
+                        phase: "list",
+                        pages: [{ url: selectedSource.url, html }]
+                      })
+                    });
+                    const result = await resp.json();
+                    if (!result.ok) { setCrawlError(result.error || "解析失败"); return; }
+                    const urls = result.detailUrls || [];
+                    (document.getElementById("manual-html") as HTMLTextAreaElement).value = "";
+                    setCrawlError(`✅ 列表解析成功！找到 ${urls.length} 条招标。请逐个打开详情页，粘贴详情HTML。`);
+                    // Store detail URLs for reference
+                    const urlList = document.getElementById("detail-urls");
+                    if (urlList) urlList.innerHTML = urls.map((u: string) => `<li><a href="${u}" target="_blank">${u.slice(-60)}</a></li>`).join("");
+                  } catch (err) { setCrawlError(String(err)); }
+                  finally { setCrawlLoading(false); }
+                }}
+              >解析列表</button>
+              <button
+                className="btn"
+                style={{ background: "#1890ff", color: "#fff" }}
+                onClick={async () => {
+                  const html = (document.getElementById("manual-html") as HTMLTextAreaElement)?.value;
+                  if (!html || !selectedRecipe || !selectedSource) return;
+                  setCrawlLoading(true);
+                  try {
+                    const resp = await fetch(`${API}/crawler/browser-ingest`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        siteKey: selectedRecipe.siteKey,
+                        sourceKey: selectedSource.key,
+                        phase: "detail",
+                        pages: [{ url: "", html }]
+                      })
+                    });
+                    const result = await resp.json();
+                    if (result.ok) {
+                      (document.getElementById("manual-html") as HTMLTextAreaElement).value = "";
+                      setCrawlError(`✅ 已入库 ${result.processed || 1} 条`);
+                      await fetchTenders(1);
+                    } else { setCrawlError(result.error || "失败"); }
+                  } catch (err) { setCrawlError(String(err)); }
+                  finally { setCrawlLoading(false); }
+                }}
+              >添加详情</button>
+            </div>
+            <ul id="detail-urls" style={{ fontSize: 11, marginTop: 6, maxHeight: 120, overflow: "auto" }} />
+          </details>
+
           {crawlError && <div className="crawler-error" role="alert">{crawlError}</div>}
 
           {selectedSource && (
             <div className="crawler-source-meta">
-              <span>Max {selectedSource.maxPages} pages</span>
-              <span>{selectedSource.strategies.join(" / ")}</span>
+              <span>最多 {selectedSource.maxPages} 页</span>
+              <span>{selectedSource.strategies.map(s => s === "backend_fetch" ? "后端采集" : s === "remote_browser" ? "远程浏览器" : s).join(" / ")}</span>
             </div>
           )}
 
@@ -627,7 +788,7 @@ export function App() {
             {jobs.length === 0 ? (
               <div className="empty-state-full">
                 <p>暂无采集任务</p>
-                <p className="empty-hint">启动采集后可在这里查看静默浏览器任务进度。</p>
+                <p className="empty-hint">启动采集后可在这里查看任务进度。</p>
               </div>
             ) : jobs.map(job => (
               <article key={job.id} className={`crawler-job crawler-job--${job.status}`}>
@@ -638,16 +799,21 @@ export function App() {
                       <span>{job.sourceKey ?? "source"}</span>
                     </div>
                     <div className="crawler-job-meta">
-                      <span>Started {formatDeadline(job.startedAt)}</span>
-                      {job.completedAt && <span>Completed {formatDeadline(job.completedAt)}</span>}
+                      <span>开始 {formatDeadline(job.startedAt)}</span>
+                      {job.completedAt && <span>完成 {formatDeadline(job.completedAt)}</span>}
                     </div>
                   </div>
-                  <span className={`crawler-status crawler-status--${job.status}`}>{job.status}</span>
+                  <span className={`crawler-status crawler-status--${job.status}`}>
+                    {job.status === "running" ? "运行中" :
+                     job.status === "completed" ? "已完成" :
+                     job.status === "failed" ? "失败" :
+                     job.status === "skipped" ? "已跳过" : job.status}
+                  </span>
                 </div>
                 <div className="crawler-job-stats">
-                  <span>{job.pagesCrawled}/{job.pagesTotal} pages</span>
-                  <span>{job.tendersFound} found</span>
-                  <span>{job.tendersNew} new</span>
+                  <span>{job.pagesCrawled}/{job.pagesTotal} 页</span>
+                  <span>发现 {job.tendersFound} 条</span>
+                  <span>新增 {job.tendersNew} 条</span>
                 </div>
                 {job.error && <div className="crawler-error">{job.error}</div>}
                 {job.strategyAttempts?.length ? (
@@ -660,8 +826,8 @@ export function App() {
                           key={`${attempt.strategy}-${attempt.url}-${index}`}
                           className={`crawler-attempt ${isSucceeded ? "crawler-attempt--succeeded" : ""} ${isFailed ? "crawler-attempt--failed" : ""}`}
                         >
-                          <span>{attempt.strategy}</span>
-                          <span>{attempt.status}</span>
+                          <span>{attempt.strategy === "backend_fetch" ? "后端采集" : attempt.strategy === "remote_browser" ? "远程浏览器" : attempt.strategy}</span>
+                          <span>{attempt.status === "succeeded" ? "成功" : attempt.status === "failed" ? "失败" : attempt.status}</span>
                           {attempt.errorCode && <span>{attempt.errorCode}</span>}
                           {attempt.message && <span>{attempt.message}</span>}
                         </div>

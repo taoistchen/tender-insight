@@ -101,6 +101,29 @@ function collected(
 
 describe("recipe crawl fallback", () => {
   it("falls back to remote browser after direct fetch fails", async () => {
+    vi.doMock("../recipes.js", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("../recipes.js")>();
+      return {
+        ...actual,
+        resolveRecipeSource: () => ({
+          recipe: {
+            siteKey: "huaian",
+            siteName: "Huai'an",
+            city: "Huaian",
+            enabled: true,
+            sources: []
+          },
+          source: {
+            ...source,
+            strategies: ["backend_fetch", "remote_browser"]
+          },
+          maxPages: 1
+        })
+      };
+    });
+
+    const { CrawlerService: MockedCrawlerService } = await import("../service.js");
+
     const direct: CrawlExecutor = {
       strategy: "backend_fetch",
       collectList: async () => {
@@ -129,7 +152,7 @@ describe("recipe crawl fallback", () => {
         )
     };
 
-    const service = new CrawlerService(undefined, {
+    const service = new MockedCrawlerService(undefined, {
       executors: [direct, remote]
     });
 
@@ -144,6 +167,7 @@ describe("recipe crawl fallback", () => {
       job.strategyAttempts?.map((attempt) => attempt.status).slice(0, 2)
     ).toEqual(["failed", "succeeded"]);
     expect(job.tendersFound).toBeGreaterThan(0);
+    vi.doUnmock("../recipes.js");
   });
 
   it("crawls multiple pages when source maxPages allows", async () => {

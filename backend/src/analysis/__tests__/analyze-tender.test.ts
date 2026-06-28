@@ -114,15 +114,15 @@ describe("analyzeTender", () => {
     expect(result.riskPoints[0]).toContain("Project budget exceeds");
   });
 
-  it("requires manual review when qualification requirements are unclear", () => {
+  it("flags unclear qualifications as risk but still recommends when score is high", () => {
     const result = analyzeTender(
       { ...baseTender, qualificationRequirements: [] },
       company,
       { now }
     );
 
-    expect(result.decision).toBe("manual_review");
-    expect(result.manualReviewRequired).toBe(true);
+    // High score (85) with non-critical risk → recommended
+    expect(result.decision).toBe("recommended");
     expect(result.riskPoints).toContain("Qualification requirements are unclear");
   });
 

@@ -5,6 +5,7 @@ import type {
   TenderNotice
 } from "../domain/types.js";
 import { levelSatisfies } from "../domain/qualification-level.js";
+import { evaluateMatchWithAI } from "./ai-score.js";
 
 export interface AnalyzeTenderOptions {
   now?: Date;
@@ -116,6 +117,63 @@ export function analyzeTender(
     matchScore: score,
     matchedPoints,
     riskPoints,
+    manualReviewRequired: decision === "manual_review"
+  };
+}
+
+/**
+ * AI-augmented tender analysis. Runs the deterministic rule-based analysis,
+ * then attempts AI evaluation and merges scores if available.
+ *
+ * Falls back gracefully — if the AI key is missing or the call fails,
+ * the rule-based result is returned unchanged.
+ */
+export async function analyzeTenderWithAI(
+  tender: TenderNotice,
+  company: CompanyProfile,
+  options: AnalyzeTenderOptions = {}
+): Promise<TenderAnalysisResult> {
+  // Run rule-based analysis first (deterministic baseline)
+  const ruleBased = analyzeTender(tender, company, options);
+
+  // Skip AI if already hard-rejected by rules
+  if (ruleBased.decision === "rejected") {
+    return ruleBased;
+  }
+
+  // Try AI evaluation
+  const aiResult = await evaluateMatchWithAI(tender, company);
+
+  if (!aiResult) {
+    return ruleBased;
+  }
+
+  // Merge: 60% rule-based, 40% AI
+  const mergedScore = Math.round(
+    ruleBased.matchScore * 0.6 + aiResult.score * 0.4
+  );
+
+  // Merge points (deduplicate)
+  const mergedMatched = [
+    ...ruleBased.matchedPoints,
+    ...aiResult.matchedPoints.filter(
+      (p) => !ruleBased.matchedPoints.some((rp) => rp.includes(p.slice(0, 10)))
+    )
+  ];
+  const mergedRisk = [
+    ...ruleBased.riskPoints,
+    ...aiResult.riskPoints.filter(
+      (p) => !ruleBased.riskPoints.some((rp) => rp.includes(p.slice(0, 10)))
+    )
+  ];
+
+  const decision = mapDecision(mergedScore, mergedRisk);
+
+  return {
+    decision,
+    matchScore: mergedScore,
+    matchedPoints: mergedMatched,
+    riskPoints: mergedRisk,
     manualReviewRequired: decision === "manual_review"
   };
 }
@@ -325,18 +383,28 @@ function tokenSet(value: string): Set<string> {
 }
 
 function mapDecision(score: number, riskPoints: string[]): Decision {
-  if (riskPoints.length > 0 && score >= 50) {
-    return "manual_review";
-  }
-  if (score >= 85 && riskPoints.length === 0) {
+  const hasCriticalRisk = riskPoints.some(
+    (p) =>
+      p.includes("Missing required qualification") ||
+      p.includes("exceeds company maximum") ||
+      p.includes("Deadline has passed")
+  );
+
+  // High score → recommended even with minor risk points
+  if (score >= 85 && !hasCriticalRisk) {
     return "recommended";
   }
+
+  // Good score → watch (may have minor risks)
   if (score >= 70) {
     return "watch";
   }
+
+  // Moderate score → manual review
   if (score >= 50) {
     return "manual_review";
   }
+
   return "not_recommended";
 }
 

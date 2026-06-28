@@ -68,6 +68,38 @@ crawlerRouter.get("/crawler/jobs", (_request, response) => {
   response.json(crawlerService.getJobs());
 });
 
+crawlerRouter.post("/crawler/browser-ingest", async (request, response) => {
+  try {
+    const { siteKey, sourceKey, phase, pages } = request.body ?? {};
+
+    if (!siteKey || !sourceKey || !phase || !Array.isArray(pages)) {
+      response.status(400).json({
+        ok: false,
+        error: "siteKey, sourceKey, phase, and pages[] are required"
+      });
+      return;
+    }
+
+    if (phase !== "list" && phase !== "detail") {
+      response.status(400).json({
+        ok: false,
+        error: 'phase must be "list" or "detail"'
+      });
+      return;
+    }
+
+    const result = await crawlerService.ingestBrowserPages({
+      siteKey,
+      sourceKey,
+      phase,
+      pages
+    });
+    response.json(result);
+  } catch (err) {
+    response.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
 crawlerRouter.post("/crawler/run", async (request, response) => {
   const validation = validateCrawlerRunRequest(request.body);
 
