@@ -29,22 +29,22 @@ export function analyzeTender(
   );
   if (excludedKeyword) {
     return rejected(0, matchedPoints, [
-      `Excluded keyword in title: ${excludedKeyword}`
+      `标题包含排除关键词: ${excludedKeyword}`
     ]);
   }
 
   if (!company.preferredRegions.includes(tender.city)) {
-    return rejected(0, matchedPoints, [`City not preferred: ${tender.city}`]);
+    return rejected(0, matchedPoints, [`城市不在公司偏好区域: ${tender.city}`]);
   }
   score += 10;
-  matchedPoints.push(`Region matched: ${tender.city}`);
+  matchedPoints.push(`区域匹配：${tender.city}`);
 
   const projectTypeMatched = company.preferredProjectTypes.some((type) =>
     `${tender.title}\n${tender.contentText}`.includes(type)
   );
   if (projectTypeMatched) {
     score += 15;
-    matchedPoints.push("Project type matched company preferences");
+    matchedPoints.push("项目类型匹配公司偏好");
   }
 
   const qualificationResult = matchQualifications(tender, company);
@@ -63,7 +63,7 @@ export function analyzeTender(
     matchedPoints.push(...personnelResult.matchedPoints);
   } else {
     score += 20;
-    matchedPoints.push("No explicit personnel hard limit found");
+    matchedPoints.push("未发现明确的人员硬性要求");
   }
 
   const performanceResult = matchPerformances(tender, company);
@@ -74,7 +74,7 @@ export function analyzeTender(
     matchedPoints.push(...performanceResult.matchedPoints);
   } else {
     score += 15;
-    matchedPoints.push("No explicit performance hard limit found");
+    matchedPoints.push("未发现明确的业绩硬性要求");
   }
 
   if (tender.budgetAmount !== undefined) {
@@ -85,14 +85,14 @@ export function analyzeTender(
     const maxOk = tender.budgetAmount <= company.maxProjectAmount;
     if (minOk && maxOk) {
       score += 10;
-      matchedPoints.push("Project budget is within company range");
+      matchedPoints.push("项目预算在公司承接范围内");
     } else if (!maxOk) {
       return rejected(score, matchedPoints, [
-        "Project budget exceeds company maximum"
+        "项目预算超出公司最大承接金额"
       ]);
     } else {
       riskPoints.push(
-        `Project budget is below company minimum: ${company.minProjectAmount.toLocaleString()}`
+        `项目预算低于公司最小承接金额: ${company.minProjectAmount.toLocaleString()}元`
       );
     }
   }
@@ -101,13 +101,13 @@ export function analyzeTender(
     ? Math.ceil((tender.deadlineTime.getTime() - now.getTime()) / 86_400_000)
     : undefined;
   if (remainingDays !== undefined && remainingDays < 0) {
-    return rejected(score, matchedPoints, ["Deadline has passed"]);
+    return rejected(score, matchedPoints, ["投标截止时间已过"]);
   }
   if (remainingDays !== undefined && remainingDays >= company.minRemainingDays) {
     score += 5;
-    matchedPoints.push(`Preparation time is sufficient: ${remainingDays} days`);
+    matchedPoints.push(`投标准备时间充足：剩余${remainingDays}天`);
   } else {
-    riskPoints.push("Preparation time is insufficient or deadline is unknown");
+    riskPoints.push("投标准备时间不足或截止时间未知");
   }
 
   const decision = mapDecision(score, riskPoints);
@@ -206,7 +206,7 @@ function matchQualifications(tender: TenderNotice, company: CompanyProfile) {
       passed: true,
       score: 10,
       matchedPoints: [] as string[],
-      riskPoints: ["Qualification requirements are unclear"]
+      riskPoints: ["资质要求不明确"]
     };
   }
 
@@ -220,13 +220,13 @@ function matchQualifications(tender: TenderNotice, company: CompanyProfile) {
 
     if (!actual || !levelSatisfies(actual.level, requirement.level)) {
       riskPoints.push(
-        `Missing required qualification: ${requirement.name} ${requirement.level}`
+        `缺少必需资质：${requirement.name} ${requirement.level}`
       );
       return { passed: false, score: 0, matchedPoints, riskPoints };
     }
 
     matchedPoints.push(
-      `Qualification matched: ${requirement.name} ${actual.level} >= ${requirement.level}`
+      `资质匹配：${requirement.name} ${actual.level} ≥ ${requirement.level}`
     );
   }
 
@@ -246,7 +246,7 @@ function matchPersonnel(tender: TenderNotice, company: CompanyProfile) {
       matchedPoints: [] as string[],
       riskPoints: requirements.map(
         (req) =>
-          `Personnel requirement not matched: ${req} (company personnel records are empty)`
+          `人员要求未匹配：${req}（公司人员档案为空）`
       )
     };
   }
@@ -259,10 +259,10 @@ function matchPersonnel(tender: TenderNotice, company: CompanyProfile) {
     );
     if (matched) {
       matchedPoints.push(
-        `Personnel requirement matched: ${requirement} (${matched.personName})`
+        `人员要求匹配：${requirement}（${matched.personName}）`
       );
     } else {
-      riskPoints.push(`Personnel requirement not matched: ${requirement}`);
+      riskPoints.push(`人员要求未匹配：${requirement}`);
     }
   }
 
@@ -385,9 +385,9 @@ function tokenSet(value: string): Set<string> {
 function mapDecision(score: number, riskPoints: string[]): Decision {
   const hasCriticalRisk = riskPoints.some(
     (p) =>
-      p.includes("Missing required qualification") ||
-      p.includes("exceeds company maximum") ||
-      p.includes("Deadline has passed")
+      p.includes("缺少必需资质") ||
+      p.includes("超出公司最大承接金额") ||
+      p.includes("投标截止时间已过")
   );
 
   // High score → recommended even with minor risk points

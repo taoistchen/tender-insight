@@ -102,8 +102,17 @@ function scoreClass(s: number): string { return s >= 85 ? "score--high" : s >= 7
 function MetricCard({ label, value }: { label: string; value: number | string }) {
   return <article className="metric"><span className="metric-label">{label}</span><strong className="metric-value">{value}</strong></article>;
 }
-function DecisionBadge({ decision }: { decision: Decision }) {
-  return <span className={`decision ${DECISION_CLASS[decision]}`}>{DECISION_LABELS[decision]}</span>;
+function DecisionBadge({ decision, onClick }: { decision: Decision; onClick?: () => void }) {
+  return (
+    <span
+      className={`decision ${DECISION_CLASS[decision]}`}
+      style={{ cursor: onClick ? "pointer" : undefined }}
+      onClick={onClick}
+      title={onClick ? "点击查看详情" : undefined}
+    >
+      {DECISION_LABELS[decision]}
+    </span>
+  );
 }
 function Spinner() {
   return <div className="loading-state"><div className="spinner" /><p>正在加载…</p></div>;
@@ -306,6 +315,7 @@ export function App() {
   const [crawlPages, setCrawlPages] = useState(1);
   const [crawlLoading, setCrawlLoading] = useState(false);
   const [crawlError, setCrawlError] = useState<string | null>(null);
+  const [detailTender, setDetailTender] = useState<ApiTender | null>(null);
   // Upload & AI extraction
   const [uploading, setUploading] = useState(false);
   const [extracted, setExtracted] = useState<{ name: string; level: string; validTo: string | null; confidence: string }[]>([]);
@@ -576,7 +586,12 @@ export function App() {
                             <td className="col-date">{t.publishDate ? t.publishDate.slice(0, 10) : "-"}</td>
                             <td className="col-date">{formatDeadline(t.deadlineTime)}</td>
                             <td className={`col-num score ${scoreClass(t.analysis.matchScore)}`}>{t.analysis.matchScore}</td>
-                            <td style={{ textAlign: "center" }}><DecisionBadge decision={t.analysis.decision} /></td>
+                            <td style={{ textAlign: "center" }}>
+                              <DecisionBadge
+                                decision={t.analysis.decision}
+                                onClick={() => setDetailTender(t)}
+                              />
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -981,6 +996,46 @@ export function App() {
             </div>
           )}
         </section>
+      )}
+
+      {/* Analysis detail modal */}
+      {detailTender && (
+        <div
+          className="modal-overlay"
+          onClick={() => setDetailTender(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{ background: "#fff", borderRadius: 8, maxWidth: 600, width: "90%", maxHeight: "80vh", overflow: "auto", padding: 24, boxShadow: "0 4px 24px rgba(0,0,0,.18)" }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <h3 style={{ margin: 0 }}>分析详情</h3>
+              <button className="btn" onClick={() => setDetailTender(null)}>✕</button>
+            </div>
+            <p style={{ color: "#666", marginBottom: 12 }}>{detailTender.title}</p>
+            <div style={{ display: "flex", gap: 16, marginBottom: 16 }}>
+              <span>匹配分: <strong>{detailTender.analysis.matchScore}</strong></span>
+              <DecisionBadge decision={detailTender.analysis.decision} />
+            </div>
+
+            <h4 style={{ color: "#52c41a", marginBottom: 8 }}>✅ 匹配点 ({detailTender.analysis.matchedPoints.length})</h4>
+            <ul style={{ marginBottom: 16, paddingLeft: 20 }}>
+              {detailTender.analysis.matchedPoints.length === 0 && <li style={{ color: "#999" }}>无</li>}
+              {detailTender.analysis.matchedPoints.map((p, i) => (
+                <li key={i} style={{ marginBottom: 4, fontSize: 14 }}>{p}</li>
+              ))}
+            </ul>
+
+            <h4 style={{ color: "#ff4d4f", marginBottom: 8 }}>⚠️ 风险点/不满足条件 ({detailTender.analysis.riskPoints.length})</h4>
+            <ul style={{ paddingLeft: 20 }}>
+              {detailTender.analysis.riskPoints.length === 0 && <li style={{ color: "#999" }}>无</li>}
+              {detailTender.analysis.riskPoints.map((p, i) => (
+                <li key={i} style={{ marginBottom: 4, fontSize: 14 }}>{p}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
       )}
     </main>
   );

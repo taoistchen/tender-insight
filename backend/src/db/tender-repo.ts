@@ -1,5 +1,5 @@
 import { pool } from "./pool.js";
-import type { TenderAnalysisResult, TenderAttachmentStatus } from "../domain/types.js";
+import type { TenderAnalysisResult, TenderAttachment, TenderAttachmentStatus } from "../domain/types.js";
 import type { EnrichedTender } from "../crawler/service.js";
 
 /** Strip NUL bytes and other problematic characters for PostgreSQL TEXT fields. */
@@ -174,6 +174,92 @@ export async function upsertTender(
   } finally {
     client.release();
   }
+}
+
+export interface PaginatedTenders {
+  items: EnrichedTender[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+/**
+ * Paginated query — only loads the requested page from DB.
+ * Much faster than loading all tenders then slicing in memory.
+ */
+export async function getTendersPaginated(
+  page: number,
+  limit: number,
+  includeExpired = false
+): Promise<PaginatedTenders> {
+  const now = new Date().toISOString();
+  const offset = (page - 1) * limit;
+
+  // Count query
+  const countResult = await pool.query(
+    `SELECT COUNT(*)::int as total FROM tender_notice tn
+     JOIN tender_analysis ta ON ta.tender_id = tn.id
+     ${includeExpired ? "" : "WHERE tn.deadline_time IS NULL OR tn.deadline_time >= $1"}`,
+    includeExpired ? [] : [now]
+  );
+  const total = countResult.rows[0].total as number;
+
+  // Page query with LIMIT/OFFSET
+  const result = await pool.query(
+    `SELECT
+       tn.url, tn.city, tn.source_site, tn.title, tn.content_text,
+       tn.source_html,
+       tn.budget_amount, tn.deadline_time, tn.publish_date,
+       ta.decision, ta.match_score,
+       ta.matched_points, ta.risk_points,
+       ta.manual_review_required
+     FROM tender_notice tn
+     JOIN tender_analysis ta ON ta.tender_id = tn.id
+     ${includeExpired ? "" : "WHERE tn.deadline_time IS NULL OR tn.deadline_time >= $1"}
+     ORDER BY ta.match_score DESC NULLS LAST, tn.deadline_time DESC NULLS LAST
+     LIMIT $${includeExpired ? 1 : 2} OFFSET $${includeExpired ? 2 : 3}`,
+    includeExpired ? [limit, offset] : [now, limit, offset]
+  );
+
+  const rows = result.rows as TenderRow[];
+  const items = rows.map((row) => {
+    return {
+      url: row.url,
+      city: row.city,
+      sourceSite: row.source_site,
+      title: row.title,
+      contentText: "",  // not needed for list view
+      sourceHtml: undefined,
+      budgetAmount: row.budget_amount ? Number(row.budget_amount) : undefined,
+      deadlineTime: row.deadline_time ? new Date(row.deadline_time) : undefined,
+      publishDate: row.publish_date ?? undefined,
+      qualificationRequirements: [] as { name: string; level: string }[],
+      personnelRequirements: [] as string[],
+      performanceRequirements: [] as string[],
+      attachments: [] as TenderAttachment[],
+      documentTexts: [] as string[],
+      analysis: {
+        decision: row.decision,
+        matchScore: row.match_score,
+        matchedPoints: (row.matched_points as string[]) ?? [],
+        riskPoints: (row.risk_points as string[]) ?? [],
+        manualReviewRequired: row.manual_review_required
+      } as TenderAnalysisResult
+    };
+  });
+
+  // Load requirements only for this page (lightweight — just quals/personnel/performance names, no full attachment text)
+  if (items.length > 0) {
+    await loadRequirements(items);
+    // Strip heavy attachment data from API response
+    for (const item of items) {
+      item.attachments = [];
+      item.documentTexts = [];
+      item.contentText = "";
+    }
+  }
+
+  return { items, total, page, limit };
 }
 
 export async function getAllTenders(): Promise<EnrichedTender[]> {

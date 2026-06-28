@@ -1,29 +1,34 @@
 import { Router } from "express";
-import { crawlerService } from "../crawler/service.js";
+import { getTendersPaginated, getAllTenders } from "../db/tender-repo.js";
+import { pool } from "../db/pool.js";
 
 export const tendersRouter = Router();
 
 tendersRouter.get("/tenders/stats", async (_request, response) => {
   try {
-    const all = await crawlerService.getAllTenders();
-    const now = new Date();
-    const active = all.filter(
-      (t) => !t.deadlineTime || new Date(t.deadlineTime).getTime() >= now.getTime()
-    );
-    const decisions = active.map((t) => t.analysis.decision);
+    const now = new Date().toISOString();
+    const stats = await pool.query(`
+      SELECT
+        COUNT(*)::int as total,
+        COUNT(*) FILTER (WHERE tn.deadline_time IS NULL OR tn.deadline_time >= $1)::int as active,
+        COUNT(*) FILTER (WHERE (tn.deadline_time IS NULL OR tn.deadline_time >= $1) AND ta.decision = 'recommended')::int as recommended,
+        COUNT(*) FILTER (WHERE (tn.deadline_time IS NULL OR tn.deadline_time >= $1) AND ta.decision = 'watch')::int as watch,
+        COUNT(*) FILTER (WHERE (tn.deadline_time IS NULL OR tn.deadline_time >= $1) AND ta.decision = 'manual_review')::int as manual_review,
+        COUNT(*) FILTER (WHERE (tn.deadline_time IS NULL OR tn.deadline_time >= $1) AND ta.decision = 'rejected')::int as rejected,
+        COUNT(*) FILTER (WHERE (tn.deadline_time IS NULL OR tn.deadline_time >= $1) AND tn.deadline_time >= $1 AND tn.deadline_time <= $2)::int as expiring_soon
+      FROM tender_notice tn
+      JOIN tender_analysis ta ON ta.tender_id = tn.id
+    `, [now, new Date(Date.now() + 7 * 86_400_000).toISOString()]);
 
+    const r = stats.rows[0];
     response.json({
-      total: all.length,
-      active: active.length,
-      recommended: decisions.filter((d) => d === "recommended").length,
-      watch: decisions.filter((d) => d === "watch").length,
-      manualReview: decisions.filter((d) => d === "manual_review").length,
-      rejected: decisions.filter((d) => d === "rejected").length,
-      expiringSoon: active.filter((t) => {
-        if (!t.deadlineTime) return false;
-        const days = Math.ceil((new Date(t.deadlineTime).getTime() - now.getTime()) / 86_400_000);
-        return days >= 0 && days <= 7;
-      }).length
+      total: r.total,
+      active: r.active,
+      recommended: r.recommended,
+      watch: r.watch,
+      manualReview: r.manual_review,
+      rejected: r.rejected,
+      expiringSoon: r.expiring_soon
     });
   } catch (err) {
     response.status(500).json({ error: String(err) });
@@ -32,33 +37,18 @@ tendersRouter.get("/tenders/stats", async (_request, response) => {
 
 tendersRouter.get("/tenders", async (request, response) => {
   try {
-    const all = await crawlerService.getAllTenders();
-
-    // Mark expired tenders (deadline has passed)
-    const now = new Date();
-    const enriched = all.map((t) => ({
-      ...t,
-      isExpired: t.deadlineTime ? new Date(t.deadlineTime).getTime() < now.getTime() : false
-    }));
-
-    // Exclude expired by default, unless ?includeExpired=1
-    const includeExpired = request.query["includeExpired"] === "1";
-    const active = includeExpired ? enriched : enriched.filter((t) => !t.isExpired);
-
-    // Pagination
     const page = Math.max(1, Number(request.query["page"]) || 1);
-    const limit = Math.min(100, Math.max(1, Number(request.query["limit"]) || 20));
-    const total = active.length;
-    const totalPages = Math.ceil(total / limit);
-    const offset = (page - 1) * limit;
-    const items = active.slice(offset, offset + limit);
+    const limit = Math.min(100, Math.max(1, Number(request.query["limit"]) || 10));
+    const includeExpired = request.query["includeExpired"] === "1";
+
+    const result = await getTendersPaginated(page, limit, includeExpired);
 
     response.json({
-      items,
-      page,
-      limit,
-      total,
-      totalPages
+      items: result.items,
+      page: result.page,
+      limit: result.limit,
+      total: result.total,
+      totalPages: Math.ceil(result.total / limit)
     });
   } catch (err) {
     response.status(500).json({ error: String(err) });
