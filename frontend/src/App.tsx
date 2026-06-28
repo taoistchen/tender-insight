@@ -306,6 +306,7 @@ export function App() {
   const [crawlPages, setCrawlPages] = useState(1);
   const [crawlLoading, setCrawlLoading] = useState(false);
   const [crawlError, setCrawlError] = useState<string | null>(null);
+  const backgroundCrawlStartedRef = useRef(false);
 
   // Upload & AI extraction
   const [uploading, setUploading] = useState(false);
@@ -420,6 +421,43 @@ export function App() {
     }
   }
 
+  async function runBackgroundCrawls(recipesToCrawl: CrawlRecipe[]) {
+    try {
+      const sitesResponse = await fetch(`${API}/crawler/sites`);
+      if (sitesResponse.ok) {
+        const sites = (await sitesResponse.json()) as { siteName: string }[];
+        for (const site of sites) {
+          if (!site.siteName) continue;
+          await fetch(`${API}/crawler/run`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ siteName: site.siteName, maxPages: 3 })
+          }).catch(err => console.warn("Background site crawl failed:", err));
+        }
+      }
+    } catch (err) {
+      console.warn("Background site crawl setup failed:", err);
+    }
+
+    for (const recipe of recipesToCrawl) {
+      for (const source of recipe.sources) {
+        await fetch(`${API}/crawler/run`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            siteKey: recipe.siteKey,
+            sourceKey: source.key,
+            maxPages: source.maxPages
+          })
+        }).catch(err => console.warn("Background recipe crawl failed:", err));
+      }
+    }
+
+    await autoCrawl(recipesToCrawl).catch((err) =>
+      console.warn("Auto-crawl failed:", err)
+    );
+  }
+
   useEffect(() => { fetchTenders(1); fetchCompany(); fetchCrawlerData(); fetchStats(); }, []);
 
   async function fetchStats() {
@@ -434,17 +472,24 @@ export function App() {
     registerSw();
   }, []);
 
-  // Auto-crawl restricted recipes when data is loaded
+  // Show the first page immediately, then refresh data in the background.
   useEffect(() => {
-    if (recipes.length > 0 && tenderState === "ready") {
-      // Delay to let the page render first, then start background crawl
-      const timer = setTimeout(() => {
-        autoCrawl(recipes).catch((err) =>
-          console.warn("Auto-crawl failed:", err)
-        );
-      }, 2000);
-      return () => clearTimeout(timer);
+    if (backgroundCrawlStartedRef.current || recipes.length === 0 || tenderState !== "ready") {
+      return;
     }
+
+    backgroundCrawlStartedRef.current = true;
+    const timer = setTimeout(() => {
+      runBackgroundCrawls(recipes)
+        .catch((err) => console.warn("Background crawl failed:", err))
+        .finally(() => {
+          fetchCrawlerData();
+          fetchStats();
+          fetchTenders(1);
+        });
+    }, 2000);
+
+    return () => clearTimeout(timer);
   }, [recipes, tenderState]);
   useEffect(() => { if (mode === "admin") fetchAdmin(); }, [mode]);
   useEffect(() => { if (mode === "crawler") fetchCrawlerData(); }, [mode]);
