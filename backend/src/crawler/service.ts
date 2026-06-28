@@ -251,6 +251,10 @@ class CrawlerService {
       }
 
       job.status = "completed";
+      // Auto-fix missing fields using stored sourceHtml
+      this.runPostCrawlEnrichment().catch((err) =>
+        console.warn("Post-crawl enrichment error:", String(err))
+      );
     } catch (err) {
       if (err instanceof CrawlerUnavailableError) {
         job.status = "skipped";
@@ -352,6 +356,9 @@ class CrawlerService {
       }
 
       job.status = "completed";
+      this.runPostCrawlEnrichment().catch((err) =>
+        console.warn("Post-crawl enrichment error:", String(err))
+      );
     } catch (err) {
       job.status = "failed";
       job.error = err instanceof Error ? err.message : String(err);
@@ -581,6 +588,53 @@ class CrawlerService {
     } catch (err) {
       return { ok: false, error: String(err) };
     }
+  }
+
+  /**
+   * After a crawl completes, re-run enrichment on tenders still missing
+   * key fields (budget, deadline). Tries attachments from stored sourceHtml.
+   */
+  async runPostCrawlEnrichment(): Promise<{ enriched: number }> {
+    if (!this.dbReady) return { enriched: 0 };
+
+    const all = await dbGetAllTenders();
+    const needsFix = all.filter(
+      (t) => !t.budgetAmount || !t.deadlineTime
+    );
+
+    if (needsFix.length === 0) return { enriched: 0 };
+
+    console.log(
+      `Post-crawl enrichment: ${needsFix.length} tenders need re-extraction`
+    );
+
+    let enriched = 0;
+    const limiter = new ConcurrencyLimiter(CRAWL_CONCURRENCY);
+
+    await Promise.all(
+      needsFix.map((tender) =>
+        limiter.run(async () => {
+          try {
+            // Load full tender data
+            await enrichTenderWithAI(tender as TenderNotice);
+
+            if ((tender.budgetAmount || !needsFix.includes(tender)) &&
+                (tender.deadlineTime || !needsFix.includes(tender))) {
+              // Update in DB
+              await upsertTender(tender);
+              enriched++;
+            }
+          } catch (err) {
+            console.warn(
+              `Post-crawl enrichment failed for ${tender.url}: ${String(err)}`
+            );
+          }
+        })
+      )
+    );
+
+    console.log(`Post-crawl enrichment done: ${enriched} updated`);
+    return { enriched };
   }
 
   get count(): number {

@@ -79,7 +79,7 @@ function preprocessHtml(html: string): string {
     return true;
   });
 
-  return lines.join("\n").slice(0, 8000);
+  return lines.join("\n").slice(0, 15000);
 }
 
 /* ── Efficient prompt ── */

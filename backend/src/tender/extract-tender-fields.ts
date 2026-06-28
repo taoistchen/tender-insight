@@ -12,9 +12,13 @@ export interface ExtractedTenderFields {
 }
 
 const amountPatterns = [
-  /合同估算价[:：]?\s*([\d.]+)\s*(万元|元)/,
-  /最高投标限价[:：]?\s*([\d.]+)\s*(万元|元)/,
-  /预算金额[:：]?\s*([\d.]+)\s*(万元|元)/
+  /合同估算价[:：]?\s*([\d,.]+)\s*(万元|元|亿)/,
+  /最高投标限价[:：]?\s*([\d,.]+)\s*(万元|元|亿)/,
+  /预算金额[:：]?\s*([\d,.]+)\s*(万元|元|亿)/,
+  /投标限价[:：]?\s*([\d,.]+)\s*(万元|元|亿)/,
+  /招标控制价[:：]?\s*([\d,.]+)\s*(万元|元|亿)/,
+  /工程概算[:：]?\s*([\d,.]+)\s*(万元|元|亿)/,
+  /项目总投资[:：约]?\s*([\d,.]+)\s*(万元|元|亿)/
 ];
 
 const deadlinePatterns = [
@@ -31,7 +35,13 @@ const deadlinePatterns = [
   // 投标截止时间：2026年7月15日9时30分 (compact format with 时/分)
   /投标截止时间[:：]?\s*([0-9]{4})年([0-9]{1,2})月([0-9]{1,2})日([0-9]{1,2})时([0-9]{1,2})分/,
   // 递交截止时间：2026年07月15日09时30分
-  /递交截止时间[:：]?\s*([0-9]{4})年([0-9]{1,2})月([0-9]{1,2})日([0-9]{1,2})时([0-9]{1,2})分/
+  /递交截止时间[:：]?\s*([0-9]{4})年([0-9]{1,2})月([0-9]{1,2})日([0-9]{1,2})时([0-9]{1,2})分/,
+  // 投标截止时间为：2026年7月15日 (为 + date-only, no time)
+  /投标截止时间\s*为\s*[:：]?\s*([0-9]{4})年([0-9]{1,2})月([0-9]{1,2})日/,
+  // 递交截止时间为：2026年7月15日 (为 + date-only)
+  /递交截止时间\s*为\s*[:：]?\s*([0-9]{4})年([0-9]{1,2})月([0-9]{1,2})日/,
+  // Fragmented HTML: 2026年 &nbsp; 6 &nbsp; 月 &nbsp; 30 &nbsp; 日
+  /投标(?:的)?截止时间\s*(?:为\s*)?[:：]?\s*([0-9]{4})\s*年\s*([0-9]{1,2})\s*月\s*([0-9]{1,2})\s*日/
 ];
 
 const qualificationPattern =
@@ -50,16 +60,16 @@ export function extractTenderFields(text: string): ExtractedTenderFields {
 function extractBudgetAmount(text: string): number | undefined {
   for (const pattern of amountPatterns) {
     const match = text.match(pattern);
-    if (!match) {
-      continue;
-    }
+    if (!match) continue;
 
-    const value = Number.parseFloat(match[1]);
-    if (Number.isNaN(value)) {
-      return undefined;
-    }
+    const raw = match[1].replace(/,/g, "");
+    const value = Number.parseFloat(raw);
+    if (Number.isNaN(value)) continue;
 
-    return match[2] === "万元" ? value * 10_000 : value;
+    const unit = match[2];
+    if (unit === "亿") return value * 100_000_000;
+    if (unit === "万元") return value * 10_000;
+    return value;
   }
 
   return undefined;
@@ -68,19 +78,13 @@ function extractBudgetAmount(text: string): number | undefined {
 function extractDeadlineTime(text: string): Date | undefined {
   for (const pattern of deadlinePatterns) {
     const match = text.match(pattern);
-    if (!match) {
-      continue;
-    }
+    if (!match) continue;
 
-    const [, year, month, day, hour, minute] = match;
+    const [, year, month, day, hour, minute] = [...match, undefined, undefined, undefined];
     return new Date(
-      `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}T${hour.padStart(
-        2,
-        "0"
-      )}:${minute.padStart(2, "0")}:00+08:00`
+      `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}T${String(hour ?? "09").padStart(2, "0")}:${String(minute ?? "30").padStart(2, "0")}:00+08:00`
     );
   }
-
   return undefined;
 }
 

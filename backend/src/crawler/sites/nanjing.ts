@@ -24,6 +24,9 @@ export class NanjingCrawler implements TenderCrawler {
 
   async fetchDetail(item: TenderListItem): Promise<TenderNotice> {
     const html = await this.#fetchText(item.detailUrl);
+    if (/流标|废标|终止公告|终止招标|招标失败|采购失败/.test(html.slice(0, 3000).replace(/<[^>]+>/g, " "))) {
+      throw new Error(`Flow-bid page skipped: ${item.detailUrl}`);
+    }
     const title = this.#extractMeta(html, "ArticleTitle") ?? item.projectName;
     const pubDate = this.#extractMeta(html, "PubDate") ?? item.publishDate;
     const detail = await extractDeepTenderDetail({

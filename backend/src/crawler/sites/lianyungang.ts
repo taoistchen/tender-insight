@@ -9,7 +9,8 @@ import type {
 } from "../types.js";
 
 const BASE_URL = "http://ggzy.lyg.gov.cn";
-const LIST_PATH = "/lygweb/jyxx/001001/001001002";
+// 001001001 = 招标公告 in Lianyungang (different from Nanjing's 001001002)
+const LIST_PATH = "/lygweb/jyxx/001001/001001001";
 const LIST_URL = `${BASE_URL}${LIST_PATH}/tradeInfo.html`;
 const PAGE_URL = (page: number) => `${BASE_URL}${LIST_PATH}/${page}.html`;
 
@@ -24,6 +25,9 @@ export class LianyungangCrawler implements TenderCrawler {
 
   async fetchDetail(item: TenderListItem): Promise<TenderNotice> {
     const html = await this.#fetchText(item.detailUrl);
+    if (/流标|废标|终止公告|终止招标|招标失败|采购失败/.test(html.slice(0, 3000).replace(/<[^>]+>/g, " "))) {
+      throw new Error(`Flow-bid page skipped: ${item.detailUrl}`);
+    }
     const title = this.#extractMeta(html, "ArticleTitle") ?? item.projectName;
     const pubDate = this.#extractMeta(html, "PubDate") ?? item.publishDate;
     const detail = await extractDeepTenderDetail({
@@ -85,7 +89,7 @@ export class LianyungangCrawler implements TenderCrawler {
   #parseListHtml(html: string, page: number): CrawlPageResult {
     const items: TenderListItem[] = [];
     const itemRegex =
-      /<a\s+href="(\/lygweb\/jyxx\/001001\/001001002\/\d+\/[a-z0-9-]+\.html)"\s+target="_blank"\s+title="([^"]*)"/gi;
+      /<a\s+href="(\/lygweb\/jyxx\/001001\/001001001\/\d+\/[a-z0-9-]+\.html)"\s+target="_blank"\s+title="([^"]*)"/gi;
 
     let match;
     while ((match = itemRegex.exec(html)) !== null) {

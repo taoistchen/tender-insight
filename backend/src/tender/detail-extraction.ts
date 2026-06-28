@@ -6,12 +6,19 @@ import type {
 const DOCUMENT_EXTENSIONS =
   /\.(?:pdf|doc|docx|xls|xlsx|zip|rar|7z|txt)(?:[?#].*)?$/i;
 
+const DOCUMENT_URL_PATTERNS = [
+  /\/attach\/preview\?attachId=/i,   // Nanjing attachment preview API
+  /\/attach\/download/i,             // Common download API
+  /\/WebbuilderMIS\/attach/i         // Zhenjiang attachment API
+];
+
 const DOCUMENT_KEYWORDS = [
   "招标文件",
   "采购文件",
   "招标资料",
   "附件",
   "下载",
+  "澄清修改文件",
   "tender document",
   "tender file",
   "download",
@@ -203,6 +210,7 @@ function makeLink(
 function isDocumentLink(haystack: string): boolean {
   return (
     DOCUMENT_EXTENSIONS.test(haystack) ||
+    DOCUMENT_URL_PATTERNS.some((pattern) => pattern.test(haystack)) ||
     DOCUMENT_KEYWORDS.some((keyword) => haystack.includes(keyword.toLowerCase()))
   );
 }

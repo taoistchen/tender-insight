@@ -132,6 +132,12 @@ export class ZhenjiangCrawler implements TenderCrawler {
     }
 
     const html = await this.#fetchText(detailUrl);
+
+    // Skip flow-bid / cancelled / terminated pages
+    if (isFlowBidPage(html)) {
+      throw new Error(`Flow-bid page skipped: ${detailUrl}`);
+    }
+
     const title = this.#extractMeta(html, "ArticleTitle") ?? item.projectName;
     const pubDate = this.#extractMeta(html, "PubDate") ?? item.publishDate;
     const detail = await extractDeepTenderDetail({
@@ -228,6 +234,14 @@ function decodeBuffer(buffer: Buffer): string {
   } catch {
     return new TextDecoder("gbk", { fatal: false }).decode(buffer);
   }
+}
+
+/** Detect flow-bid / cancelled / terminated tender pages. */
+function isFlowBidPage(html: string): boolean {
+  const title = html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? "";
+  const body = html.replace(/<[^>]+>/g, " ").slice(0, 3000);
+  const haystack = `${title} ${body}`;
+  return /流标|废标|终止公告|终止招标|招标失败|采购失败/.test(haystack);
 }
 
 function parseDate(raw: string): Date | undefined {
