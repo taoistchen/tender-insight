@@ -6,6 +6,7 @@
  */
 
 import { chat } from "../ai/config.js";
+import { MAX_PAGE_CHARS, withAdaptiveExtraction } from "../ai/extraction-config.js";
 import type { QualificationRequirement } from "../domain/types.js";
 
 export interface AiExtractedFields {
@@ -34,7 +35,7 @@ export function escapeNonHtml(content: string): string {
  * stripping nav, header, footer, scripts, and styles. Reduces
  * 70KB+ pages down to 3-8KB of dense, relevant text for the AI.
  */
-function preprocessHtml(html: string): string {
+function preprocessHtml(html: string, maxChars = MAX_PAGE_CHARS): string {
   // 1. Remove non-content elements
   let text = html
     .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
@@ -79,7 +80,7 @@ function preprocessHtml(html: string): string {
     return true;
   });
 
-  return lines.join("\n").slice(0, 15000);
+  return lines.join("\n").slice(0, maxChars);
 }
 
 /* ── Efficient prompt ── */
@@ -110,9 +111,11 @@ ${text}`;
 /* ── Main API ── */
 
 export async function extractTenderFromPage(
-  html: string
+  html: string,
+  maxChars?: number
 ): Promise<AiExtractedFields | null> {
-  const text = preprocessHtml(html);
+  const limit = maxChars ?? MAX_PAGE_CHARS;
+  const text = preprocessHtml(html, limit);
   if (text.length < 30) return null;
 
   const result = await chat(

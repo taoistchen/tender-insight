@@ -107,9 +107,41 @@ async function extractDocumentText(
 
   if (
     lowerType.includes("wordprocessingml.document") ||
-    lowerType.includes("msword")
+    lowerType.includes("msword") ||
+    lowerType.includes("application/vnd.openxmlformats-officedocument")
   ) {
     return parseWord(buffer);
+  }
+
+  // Fallback: detect file type from magic bytes when content-type is unknown
+  return detectAndParse(buffer);
+}
+
+/** Detect file type from magic bytes and parse accordingly. */
+async function detectAndParse(buffer: Buffer): Promise<string | null> {
+  if (buffer.length < 4) return null;
+
+  // PDF: starts with %PDF
+  if (buffer[0] === 0x25 && buffer[1] === 0x50 && buffer[2] === 0x44 && buffer[3] === 0x46) {
+    return parsePdf(buffer);
+  }
+
+  // ZIP-based formats (DOCX, XLSX, ODT): starts with PK
+  if (buffer[0] === 0x50 && buffer[1] === 0x4b) {
+    return parseWord(buffer);
+  }
+
+  // OLE2 format (old .doc, .xls, .ppt): starts with D0 CF 11 E0
+  if (buffer[0] === 0xd0 && buffer[1] === 0xcf && buffer[2] === 0x11 && buffer[3] === 0xe0) {
+    return parseWord(buffer);
+  }
+
+  // Plain text: check if buffer is mostly printable ASCII/UTF-8
+  const sample = buffer.slice(0, Math.min(buffer.length, 512));
+  const printable = sample.filter(b => (b >= 0x20 && b < 0x7f) || b === 0x0a || b === 0x0d || b === 0x09 || b > 0x7f);
+  if (printable.length > sample.length * 0.9) {
+    const text = decodeText(buffer).trim();
+    if (text.length > 10) return text;
   }
 
   return null;

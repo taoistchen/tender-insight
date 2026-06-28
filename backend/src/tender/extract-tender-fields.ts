@@ -1,5 +1,11 @@
+import { createRequire } from "node:module";
 import type { QualificationRequirement, TenderNotice } from "../domain/types.js";
 import { extractTenderFromPage, escapeNonHtml } from "../analysis/ai-extract.js";
+import { MAX_ATTACH_CHARS, MAX_COMBINED_PAGE_CHARS, withAdaptiveExtraction } from "../ai/extraction-config.js";
+
+const require = createRequire(import.meta.url);
+const pdfParse: ((buf: Buffer, opts?: { max?: number }) => Promise<{ text?: string }>) | undefined =
+  (() => { try { return require("pdf-parse"); } catch { return undefined; } })();
 
 export interface ExtractedTenderFields {
   budgetAmount?: number;
@@ -177,24 +183,38 @@ export async function enrichTenderWithAI(
     (t) => t && t.trim().length > 20
   );
 
-  // Phase 1: AI on page HTML
+  // Phase 1: AI on page HTML (with adaptive extraction window)
   if (html && html.length >= 100) {
-    const aiFields = await extractTenderFromPage(html);
+    const aiFields = await withAdaptiveExtraction((pageLimit) =>
+      extractTenderFromPage(html, pageLimit)
+    );
 
     if (aiFields) {
       applyAiFields(tender, aiFields);
 
-      // If budget still missing but we have attachment texts, try again
-      if (!tender.budgetAmount && attachmentTexts.length > 0) {
-        const escapedAttach = attachmentTexts
-          .map((t) => escapeNonHtml(t))
-          .join("\n---\n")
-          .slice(0, 8000);
-        // Put attachment text first so it's within the preprocessing window
-        const combinedHtml = "<html><body>" + escapedAttach + "\n\n===页面内容===\n" + html + "</body></html>";
-        const aiAttach = await extractTenderFromPage(combinedHtml);
-        if (aiAttach) {
-          applyAiFields(tender, aiAttach);
+      // If budget still missing, try attachment texts (stored or auto-discovered)
+      if (!tender.budgetAmount) {
+        let attachTexts = attachmentTexts;
+
+        // If no stored attachment texts, try to discover + download from sourceHtml
+        if (attachTexts.length === 0 && pdfParse) {
+          const discovered = await discoverAndParseAttachments(html);
+          if (discovered.length > 0) {
+            attachTexts = discovered;
+            tender.documentTexts = discovered;
+          }
+        }
+
+        if (attachTexts.length > 0) {
+          const escapedAttach = attachTexts
+            .map((t) => escapeNonHtml(t))
+            .join("\n---\n")
+            .slice(0, MAX_ATTACH_CHARS);
+          const combinedHtml = "<html><body>" + escapedAttach + "\n\n===页面内容===\n" + html.slice(0, MAX_COMBINED_PAGE_CHARS) + "</body></html>";
+          const aiAttach = await extractTenderFromPage(combinedHtml);
+          if (aiAttach) {
+            applyAiFields(tender, aiAttach);
+          }
         }
       }
       return;
@@ -206,7 +226,7 @@ export async function enrichTenderWithAI(
     const escaped = attachmentTexts
       .map((t) => escapeNonHtml(t))
       .join("\n---\n")
-      .slice(0, 12000);
+      .slice(0, MAX_ATTACH_CHARS * 2);
     const aiFields = await extractTenderFromPage(
       `<html><body>${escaped}</body></html>`
     );
@@ -288,4 +308,79 @@ function applyAiFields(
       }
     }
   }
+}
+
+/** Discover attachment links in HTML, download PDFs, and return parsed text. */
+async function discoverAndParseAttachments(html: string): Promise<string[]> {
+  const texts: string[] = [];
+  if (!pdfParse) return texts;
+
+  // Match common attachment URL patterns
+  const patterns = [
+    /attachId=([a-f0-9-]+)/gi,           // Nanjing preview API
+    /\/attach\/download[^"'\s]*/gi,       // Generic download
+    /href="([^"]*\.pdf[^"]*)"/gi,         // Direct PDF links
+    /href="([^"]*\.docx?[^"]*)"/gi        // Direct DOCX links
+  ];
+
+  const urls = new Set<string>();
+  for (const pattern of patterns) {
+    for (const m of html.matchAll(pattern)) {
+      let url = m[1] || m[0];
+      // Build full URL for attachId patterns
+      if (url.length === 36 && /^[a-f0-9-]+$/i.test(url)) {
+        url = `http://njggzy.nanjing.gov.cn/njxm-prod/api/attach/preview?attachId=${url}`;
+      }
+      urls.add(url);
+    }
+  }
+
+  for (const url of urls) {
+    try {
+      const resp = await fetch(url, {
+        headers: { "User-Agent": "Mozilla/5.0 Chrome/126" },
+        signal: AbortSignal.timeout(30000)
+      });
+      if (!resp.ok) continue;
+      const buf = Buffer.from(await resp.arrayBuffer());
+      if (buf.length < 100) continue;
+
+      // PDF: %PDF
+      if (buf[0] === 0x25 && buf[1] === 0x50) {
+        const result = await pdfParse(buf, { max: 30 });
+        if (result.text && result.text.length > 100) {
+          texts.push(result.text);
+        }
+        continue;
+      }
+      // DOCX (ZIP-based): PK
+      if (buf[0] === 0x50 && buf[1] === 0x4b) {
+        try {
+          const mammoth = require("mammoth") as {
+            extractRawText(input: { buffer: Buffer }): Promise<{ value?: string }>;
+          };
+          const result = await mammoth.extractRawText({ buffer: buf });
+          if (result.value && result.value.trim().length > 100) {
+            texts.push(result.value.trim());
+          }
+        } catch { /* mammoth parse failed */ }
+        continue;
+      }
+      // OLE2 (.doc): D0 CF 11 E0
+      if (buf[0] === 0xd0 && buf[1] === 0xcf && buf[2] === 0x11 && buf[3] === 0xe0) {
+        try {
+          const mammoth = require("mammoth") as {
+            extractRawText(input: { buffer: Buffer }): Promise<{ value?: string }>;
+          };
+          const result = await mammoth.extractRawText({ buffer: buf });
+          if (result.value && result.value.trim().length > 100) {
+            texts.push(result.value.trim());
+          }
+        } catch { /* mammoth parse failed */ }
+        continue;
+      }
+    } catch { /* skip failed downloads */ }
+  }
+
+  return texts;
 }
