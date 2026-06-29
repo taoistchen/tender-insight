@@ -316,30 +316,53 @@ export function App() {
   const [crawlLoading, setCrawlLoading] = useState(false);
   const [crawlError, setCrawlError] = useState<string | null>(null);
   const [detailTender, setDetailTender] = useState<ApiTender | null>(null);
-  // Upload & AI extraction
+  // Upload & AI extraction — unified for all 4 categories
   const [uploading, setUploading] = useState(false);
-  const [extracted, setExtracted] = useState<{ name: string; level: string; validTo: string | null; confidence: string }[]>([]);
+  const [extracted, setExtracted] = useState<{
+    qualifications: { name: string; level: string; validTo: string | null; confidence: string }[];
+    personnel: { personName: string; certificateType: string | null; major: string | null; level: string | null; validTo: string | null; confidence: string }[];
+    performances: { projectName: string; projectType: string | null; amount: number | null; completionDate: string | null; confidence: string }[];
+    preferences: { preferredRegions: string[]; preferredProjectTypes: string[]; excludedKeywords: string[] } | null;
+  } | null>(null);
   const [showPrefsModal, setShowPrefsModal] = useState(false);
 
   async function handleUpload(files: File[]) {
-    setUploading(true); setExtracted([]);
+    setUploading(true); setExtracted(null);
     const form = new FormData();
     files.forEach(f => form.append("files", f));
     try {
       const r = await fetch(`${API}/company/qualifications/upload`, { method: "POST", body: form });
       const data = await r.json();
-      if (data.extracted) setExtracted(data.extracted);
+      // Check for unified response first, fallback to old format
+      if (data.qualifications !== undefined || data.personnel !== undefined) {
+        setExtracted(data);
+      } else if (data.extracted) {
+        // Backward compat: old format
+        setExtracted({ qualifications: data.extracted, personnel: [], performances: [], preferences: null });
+      }
     } catch (err) { console.error("Upload failed:", err); }
     setUploading(false);
   }
 
-  async function confirmExtracted(items: typeof extracted) {
-    if (!items.length) return;
+  async function confirmExtracted() {
+    if (!extracted) return;
+    const hasAny =
+      extracted.qualifications.length > 0 ||
+      extracted.personnel.length > 0 ||
+      extracted.performances.length > 0 ||
+      extracted.preferences != null;
+    if (!hasAny) return;
+
     await fetch(`${API}/company/qualifications/confirm`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ qualifications: items.map(({ name, level, validTo }) => ({ name, level, validTo })) })
+      body: JSON.stringify({
+        qualifications: extracted.qualifications.map(({ name, level, validTo }) => ({ name, level, validTo })),
+        personnel: extracted.personnel.map(({ personName, certificateType, major, level, validTo }) => ({ personName, certificateType, major, level, validTo })),
+        performances: extracted.performances.map(({ projectName, projectType, amount, completionDate }) => ({ projectName, projectType, amount, completionDate })),
+        preferences: extracted.preferences,
+      })
     });
-    setExtracted([]); fetchAdmin();
+    setExtracted(null); fetchAdmin();
   }
 
   /* ─── Fetch ─── */
@@ -844,6 +867,82 @@ export function App() {
       ) : (
         /* ─── Admin Panel ─── */
         <section className="admin-panel">
+          {/* Upload zone — positioned above tabs, always visible */}
+          <UploadZone onFiles={handleUpload} />
+
+          {/* Upload progress & unified extracted results */}
+          {uploading && <div className="loading-state" style={{ margin: "12px 0" }}><div className="spinner" /><p>AI 正在识别证书文件，综合解析企业资质、人员证书、历史业绩、投标偏好…</p></div>}
+
+          {extracted && (
+            (extracted.qualifications.length > 0 || extracted.personnel.length > 0 || extracted.performances.length > 0 || extracted.preferences != null) ? (
+              <div className="extracted-results" style={{ marginBottom: 16 }}>
+                <p className="extracted-title">AI 综合识别结果（请核对后统一入库）</p>
+
+                {extracted.qualifications.length > 0 && (
+                  <div style={{ marginBottom: 12 }}>
+                    <p style={{ fontWeight: 600, margin: "0 0 4px", fontSize: 14, color: "var(--color-primary)" }}>🏗️ 企业资质 ({extracted.qualifications.length})</p>
+                    {extracted.qualifications.map((q, i) => (
+                      <div key={`q-${i}`} className="extracted-row">
+                        <span><strong>{q.name}</strong> — {q.level}</span>
+                        {q.validTo && <span className="admin-meta">有效期至 {q.validTo}</span>}
+                        <span className={`confidence confidence--${q.confidence}`}>{q.confidence === "high" ? "高置信" : "中置信"}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {extracted.personnel.length > 0 && (
+                  <div style={{ marginBottom: 12 }}>
+                    <p style={{ fontWeight: 600, margin: "0 0 4px", fontSize: 14, color: "var(--color-primary)" }}>👤 人员证书 ({extracted.personnel.length})</p>
+                    {extracted.personnel.map((p, i) => (
+                      <div key={`p-${i}`} className="extracted-row">
+                        <span><strong>{p.personName}</strong> {p.certificateType && <span>— {p.certificateType}</span>} {p.major && <span>· {p.major}</span>} {p.level && <span className="qualification-level-tag">{p.level}</span>}</span>
+                        {p.validTo && <span className="admin-meta">至 {p.validTo}</span>}
+                        <span className={`confidence confidence--${p.confidence}`}>{p.confidence === "high" ? "高置信" : "中置信"}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {extracted.performances.length > 0 && (
+                  <div style={{ marginBottom: 12 }}>
+                    <p style={{ fontWeight: 600, margin: "0 0 4px", fontSize: 14, color: "var(--color-primary)" }}>📋 历史业绩 ({extracted.performances.length})</p>
+                    {extracted.performances.map((p, i) => (
+                      <div key={`f-${i}`} className="extracted-row">
+                        <span><strong>{p.projectName}</strong> {p.projectType && <span className="preference-tag">{p.projectType}</span>} {p.amount != null && <span>{formatAmount(p.amount)}</span>}</span>
+                        {p.completionDate && <span className="admin-meta">{p.completionDate}</span>}
+                        <span className={`confidence confidence--${p.confidence}`}>{p.confidence === "high" ? "高置信" : "中置信"}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {extracted.preferences && (
+                  <div style={{ marginBottom: 12 }}>
+                    <p style={{ fontWeight: 600, margin: "0 0 4px", fontSize: 14, color: "var(--color-primary)" }}>🎯 投标偏好推断</p>
+                    <div style={{ fontSize: 13, padding: "4px 0" }}>
+                      {extracted.preferences.preferredRegions.length > 0 && <span style={{ marginRight: 12 }}>可投城市: {extracted.preferences.preferredRegions.join('、')}</span>}
+                      {extracted.preferences.preferredProjectTypes.length > 0 && <span style={{ marginRight: 12 }}>项目类型: {extracted.preferences.preferredProjectTypes.join('、')}</span>}
+                      {extracted.preferences.excludedKeywords.length > 0 && <span>排除: {extracted.preferences.excludedKeywords.join('、')}</span>}
+                    </div>
+                  </div>
+                )}
+
+                <div className="extracted-actions">
+                  <button className="btn btn-primary" onClick={confirmExtracted}>全部确认入库</button>
+                  <button className="btn" onClick={() => setExtracted(null)}>放弃</button>
+                </div>
+              </div>
+            ) : (
+              <div className="extracted-results" style={{ marginBottom: 16 }}>
+                <p className="extracted-title">⚠️ AI 未能从上传文件中识别出有效信息，请确认文件清晰可读或手动录入</p>
+                <div className="extracted-actions">
+                  <button className="btn" onClick={() => setExtracted(null)}>关闭</button>
+                </div>
+              </div>
+            )
+          )}
+
           <nav className="admin-tabs">
             {(["qualifications", "personnel", "performances", "preferences"] as AdminTab[]).map(tab => (
               <button key={tab} className={`btn ${adminTab === tab ? "btn-primary" : ""}`}
@@ -857,41 +956,20 @@ export function App() {
             <div className="admin-content">
               {/* Qualifications */}
               {adminTab === "qualifications" && (
-                <>
-                  <UploadZone onFiles={handleUpload} />
-                  {uploading && <div className="loading-state"><div className="spinner" /><p>AI 正在识别证书…</p></div>}
-                  {extracted.length > 0 && (
-                    <div className="extracted-results">
-                      <p className="extracted-title">AI 识别结果（请确认后入库）</p>
-                      {extracted.map((q, i) => (
-                        <div key={i} className="extracted-row">
-                          <span><strong>{q.name}</strong> — {q.level}</span>
-                          {q.validTo && <span className="admin-meta">有效期至 {q.validTo}</span>}
-                          <span className={`confidence confidence--${q.confidence}`}>{q.confidence === "high" ? "高置信" : "中置信"}</span>
-                        </div>
-                      ))}
-                      <div className="extracted-actions">
-                        <button className="btn btn-primary" onClick={() => confirmExtracted(extracted)}>全部确认入库</button>
-                        <button className="btn" onClick={() => setExtracted([])}>放弃</button>
-                      </div>
-                    </div>
-                  )}
-                  <hr style={{ margin: "20px 0", border: "none", borderTop: "1px solid var(--color-border)" }} />
-                  <AdminList items={quals} render={q => <><strong>{q.name}</strong> <span className="qualification-level-tag">{q.level}</span> <span className="admin-meta">有效期至 {formatDate(q.validTo)}</span></>}
-                    onDelete={id => deleteItem(`${API}/company/qualifications/${id}`)}
-                    onEdit={q => { setEditing(q); setAdding(true); }}
-                    addLabel="+ 手动新增资质" adding={adding} onAdd={() => { setAdding(true); setEditing(null); }}
-                    addForm={<AdminForm
-                      fields={[{ key: "name", label: "资质名称" }, { key: "level", label: "等级" }, { key: "validTo", label: "有效期至", type: "date" }]}
-                      initial={editing ? { name: editing.name as string, level: editing.level as string, validTo: editing.validTo as string } : undefined}
-                      onCancel={() => { setAdding(false); setEditing(null); }}
-                      onSubmit={data => {
-                        if (editing) saveItem(`${API}/company/qualifications/${editing.id}`, "PUT", data);
-                        else saveItem(`${API}/company/qualifications`, "POST", data);
-                      }}
-                    />}
-                  />
-                </>
+                <AdminList items={quals} render={q => <><strong>{q.name}</strong> <span className="qualification-level-tag">{q.level}</span> <span className="admin-meta">有效期至 {formatDate(q.validTo)}</span></>}
+                  onDelete={id => deleteItem(`${API}/company/qualifications/${id}`)}
+                  onEdit={q => { setEditing(q); setAdding(true); }}
+                  addLabel="+ 手动新增资质" adding={adding} onAdd={() => { setAdding(true); setEditing(null); }}
+                  addForm={<AdminForm
+                    fields={[{ key: "name", label: "资质名称" }, { key: "level", label: "等级" }, { key: "validTo", label: "有效期至", type: "date" }]}
+                    initial={editing ? { name: editing.name as string, level: editing.level as string, validTo: editing.validTo as string } : undefined}
+                    onCancel={() => { setAdding(false); setEditing(null); }}
+                    onSubmit={data => {
+                      if (editing) saveItem(`${API}/company/qualifications/${editing.id}`, "PUT", data);
+                      else saveItem(`${API}/company/qualifications`, "POST", data);
+                    }}
+                  />}
+                />
               )}
 
               {/* Personnel */}
