@@ -18,16 +18,50 @@ export interface ExtractedTenderFields {
 }
 
 const amountPatterns = [
+  // Standard: 合同估算价：3154.62 万元
   /合同估算价[:：]?\s*([\d,.]+)\s*(万元|元|亿)/,
   /最高投标限价[:：]?\s*([\d,.]+)\s*(万元|元|亿)/,
   /预算金额[:：]?\s*([\d,.]+)\s*(万元|元|亿)/,
   /投标限价[:：]?\s*([\d,.]+)\s*(万元|元|亿)/,
   /招标控制价[:：]?\s*([\d,.]+)\s*(万元|元|亿)/,
   /工程概算[:：]?\s*([\d,.]+)\s*(万元|元|亿)/,
-  /项目总投资[:：约]?\s*([\d,.]+)\s*(万元|元|亿)/
+  /项目总投资[:：约]?\s*([\d,.]+)\s*(万元|元|亿)/,
+  // Format: XX价为850万元 (为 instead of colon)
+  /合同估算价为\s*([\d,.]+)\s*(万元|元|亿)/,
+  /最高投标限价为\s*([\d,.]+)\s*(万元|元|亿)/,
+  /招标控制价为\s*([\d,.]+)\s*(万元|元|亿)/,
+  /预算金额为\s*([\d,.]+)\s*(万元|元|亿)/,
+  /项目总投资为\s*([\d,.]+)\s*(万元|元|亿)/,
+  // LYG format: 工程合同估算价（万元）：3154.62 (unit in parens before colon)
+  /合同估算价(?:（([万元亿]+)）)\s*[:：]?\s*([\d,.]+)/,
+  /最高投标限价(?:（([万元亿]+)）)\s*[:：]?\s*([\d,.]+)/,
+  /招标控制价(?:（([万元亿]+)）)\s*[:：]?\s*([\d,.]+)/,
+  /工程概算(?:（([万元亿]+)）)\s*[:：]?\s*([\d,.]+)/,
+  /预算金额(?:（([万元亿]+)）)\s*[:：]?\s*([\d,.]+)/,
+  /投标限价(?:（([万元亿]+)）)\s*[:：]?\s*([\d,.]+)/,
+  // Zhenjiang tabular: "标段估算价（万元）" label in one cell, value in subsequent cells
+  // Use constrained value (≤7 digits, optional decimal, NOT part of a longer digit sequence)
+  /标段(?:合同)?估算价(?:（([万元亿]+)）)\s*[\s\S]{0,200}?(?<!\d)(\d{1,7}(?:\.\d+)?)(?!\d)/,
+  /标段估算价(?:（([万元亿]+)）)\s*[\s\S]{0,200}?(?<!\d)(\d{1,7}(?:\.\d+)?)(?!\d)/,
+  // Generic: any ^{p}XX价（单位）：数字
+  /(?:工程)?(?:合同)?估算价(?:（([万元亿]+)）)\s*[:：]?\s*([\d,.]+)/,
+  /控制价(?:（([万元亿]+)）)\s*[:：]?\s*([\d,.]+)/,
+  /限价(?:（([万元亿]+)）)\s*[:：]?\s*([\d,.]+)/,
+  // Tabular fallback for any 估算价（单位） with value further away
+  /(?:合同)?估算价(?:（([万元亿]+)）)\s*[\s\S]{0,100}?(?<!\d)(\d{1,7}(?:\.\d+)?)(?!\d)(?:\s*(万元|元|亿))?/,
 ];
 
 const deadlinePatterns = [
+  // LYG format: 投标截止时间为：2026-06-29 9:00:00 (dash-separated, single-digit hour, with seconds)
+  /投标截止时间\s*为\s*[:：]\s*([0-9]{4})-([0-9]{1,2})-([0-9]{1,2})\s+([0-9]{1,2})[:：]([0-9]{1,2})(?:[:：]([0-9]{1,2}))?/,
+  // 递交截止时间为：2026-06-29 9:00:00
+  /递交截止时间\s*为\s*[:：]\s*([0-9]{4})-([0-9]{1,2})-([0-9]{1,2})\s+([0-9]{1,2})[:：]([0-9]{1,2})(?:[:：]([0-9]{1,2}))?/,
+  // 投标文件递交截止时间为：2026-06-29 9:00:00
+  /投标文件递交截止时间\s*为\s*[:：]\s*([0-9]{4})-([0-9]{1,2})-([0-9]{1,2})\s+([0-9]{1,2})[:：]([0-9]{1,2})(?:[:：]([0-9]{1,2}))?/,
+  // 开标时间：2026-06-29 09:00 (dash-separated without seconds)
+  /开标时间\s*为?\s*[:：]?\s*([0-9]{4})-([0-9]{1,2})-([0-9]{1,2})\s+([0-9]{1,2})[:：]([0-9]{1,2})(?:[:：]([0-9]{1,2}))?/,
+  // 开标时间：2026年07月15日 09:30
+  /开标时间\s*为?\s*[:：]?\s*([0-9]{4})年([0-9]{1,2})月([0-9]{1,2})日\s*([0-9]{1,2})[:：]([0-9]{1,2})/,
   // 投标截止时间：2026年07月15日 09:30
   /投标截止时间[:：]?\s*([0-9]{4})年([0-9]{1,2})月([0-9]{1,2})日\s*([0-9]{1,2})[:：]([0-9]{1,2})/,
   // 递交截止时间：2026年7月15日 9:30
@@ -46,6 +80,12 @@ const deadlinePatterns = [
   /投标截止时间\s*为\s*[:：]?\s*([0-9]{4})年([0-9]{1,2})月([0-9]{1,2})日/,
   // 递交截止时间为：2026年7月15日 (为 + date-only)
   /递交截止时间\s*为\s*[:：]?\s*([0-9]{4})年([0-9]{1,2})月([0-9]{1,2})日/,
+  // LYG fragmented: 投标文件递交的截止时间（投标截止时间，下同）为 2026 年 6 月 12 日 9 时 00 分
+  // - tolerant gap [^0-9]{0,20}? spans the （…，下同）为 parenthetical between marker and date
+  // - \s* between every digit and 年/月/日/时/分 handles &nbsp;-fragmented HTML
+  /(?:投标|递交)[一-龥]{0,8}?截止时间[^0-9]{0,20}?\s*([0-9]{4})\s*年\s*([0-9]{1,2})\s*月\s*([0-9]{1,2})\s*日\s*([0-9]{1,2})\s*时\s*([0-9]{1,2})\s*分/,
+  // Same tolerant marker, date-only or HH:MM (covers 为 + 2026年6月12日 / 2026年6月12日 9:30)
+  /(?:投标|递交)[一-龥]{0,8}?截止时间[^0-9]{0,20}?\s*([0-9]{4})\s*年\s*([0-9]{1,2})\s*月\s*([0-9]{1,2})\s*日(?:\s+([0-9]{1,2})[:：]([0-9]{1,2}))?/,
   // Fragmented HTML: 2026年 &nbsp; 6 &nbsp; 月 &nbsp; 30 &nbsp; 日
   /投标(?:的)?截止时间\s*(?:为\s*)?[:：]?\s*([0-9]{4})\s*年\s*([0-9]{1,2})\s*月\s*([0-9]{1,2})\s*日/
 ];
@@ -68,14 +108,27 @@ function extractBudgetAmount(text: string): number | undefined {
     const match = text.match(pattern);
     if (!match) continue;
 
-    const raw = match[1].replace(/,/g, "");
+    // New patterns with （单位）: group 1=unit-from-parens, group 2=value
+    // Old patterns: group 1=value, group 2=trailing-unit
+    let raw: string;
+    let unit: string | undefined;
+
+    if (match.length >= 3 && match[2] && /^[\d,.]+$/.test(match[2])) {
+      // New-style: paren-unit is in group 1, value in group 2
+      unit = match[1];      // unit from （万元）
+      raw = match[2].replace(/,/g, "");
+    } else {
+      // Old-style: value in group 1, trailing unit in group 2
+      raw = match[1].replace(/,/g, "");
+      unit = match[2];
+    }
+
     const value = Number.parseFloat(raw);
     if (Number.isNaN(value)) continue;
 
-    const unit = match[2];
     if (unit === "亿") return value * 100_000_000;
     if (unit === "万元") return value * 10_000;
-    return value;
+    return value; // default: 元
   }
 
   return undefined;
@@ -86,9 +139,14 @@ function extractDeadlineTime(text: string): Date | undefined {
     const match = text.match(pattern);
     if (!match) continue;
 
-    const [, year, month, day, hour, minute] = [...match, undefined, undefined, undefined];
+    // Groups: 1=year, 2=month, 3=day, 4=hour, 5=minute, 6=optional-second
+    const year = match[1];
+    const month = String(match[2]).padStart(2, "0");
+    const day = String(match[3]).padStart(2, "0");
+    const hour = String(match[4] ?? "09").padStart(2, "0");
+    const minute = String(match[5] ?? "30").padStart(2, "0");
     return new Date(
-      `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}T${String(hour ?? "09").padStart(2, "0")}:${String(minute ?? "30").padStart(2, "0")}:00+08:00`
+      `${year}-${month}-${day}T${hour}:${minute}:00+08:00`
     );
   }
   return undefined;
@@ -236,7 +294,7 @@ export async function enrichTenderWithAI(
     }
   }
 
-  // Phase 3: AI unavailable — regex fallback
+  // Phase 3: regex fallback — only when AI is unavailable
   const text = [tender.title, tender.contentText, ...attachmentTexts].join("\n");
   const regexFields = extractTenderFields(text);
   if (!tender.budgetAmount && regexFields.budgetAmount) {

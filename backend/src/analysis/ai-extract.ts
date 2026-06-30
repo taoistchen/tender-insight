@@ -123,7 +123,9 @@ export async function extractTenderFromPage(
       { role: "system", content: SYSTEM_PROMPT },
       { role: "user", content: buildPrompt(text) }
     ],
-    { temperature: 0, max_tokens: 2048 }
+    // Reasoning models spend tokens on chain-of-thought before the answer;
+    // 4096 leaves headroom so content isn't truncated to empty.
+    { temperature: 0, max_tokens: 4096 }
   );
 
   if (!result) return null;
