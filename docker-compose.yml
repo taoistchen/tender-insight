@@ -7,12 +7,12 @@ services:
       - .env
     environment:
       HOST: 0.0.0.0
-      PORT: 3001
+      PORT: 3002
       DATABASE_URL: postgresql://tender:tender@postgres:5432/tender_insight
       REDIS_URL: redis://redis:6379
       DATA_DIR: /app/data
     ports:
-      - "3001:3001"
+      - "3002:3002"
     volumes:
       - app-data:/app/data
     depends_on:
@@ -21,7 +21,7 @@ services:
       redis:
         condition: service_started
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3001/api/health',r=>{let d='';r.on('data',c=>d+=c);r.on('end',()=>process.exit(r.statusCode===200?0:1))}).on('error',()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3002/api/health',r=>{let d='';r.on('data',c=>d+=c);r.on('end',()=>process.exit(r.statusCode===200?0:1))}).on('error',()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 3

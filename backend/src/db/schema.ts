@@ -76,7 +76,7 @@ CREATE INDEX IF NOT EXISTS idx_analysis_decision  ON tender_analysis(decision);
 CREATE TABLE IF NOT EXISTS company_profile (
   id                   SERIAL PRIMARY KEY,
   company_name         VARCHAR(255) NOT NULL,
-  max_project_amount   NUMERIC(18,2) DEFAULT 20000000,
+  max_project_amount   NUMERIC(18,2) DEFAULT 1000000000,
   min_project_amount   NUMERIC(18,2) DEFAULT 0,
   min_remaining_days   INT DEFAULT 5,
   preferred_regions    TEXT[] DEFAULT '{}',
